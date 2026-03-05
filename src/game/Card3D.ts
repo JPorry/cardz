@@ -87,7 +87,7 @@ export class Card3D {
     const centerGeometry = new THREE.ExtrudeGeometry(cardShape, extrudeSettings);
     centerGeometry.translate(0, 0, -CARD_THICKNESS / 2); // Center on Z
 
-    const centerMat = new THREE.MeshStandardMaterial({ color: 0x222222, transparent: true, opacity: 1 });
+    const centerMat = new THREE.MeshStandardMaterial({ color: 0x222222, transparent: false, opacity: 1 });
     const centerMesh = new THREE.Mesh(centerGeometry, centerMat);
     centerMesh.castShadow = true;
     centerMesh.receiveShadow = true;
@@ -97,9 +97,9 @@ export class Card3D {
     const faceShape = this.createRoundedRectShape(CARD_WIDTH * 0.95, CARD_HEIGHT * 0.95, 0.08);
     const faceGeometry = new THREE.ShapeGeometry(faceShape);
     
-    this.frontMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 1 });
+    this.frontMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: false, opacity: 1 });
     this.frontMesh = new THREE.Mesh(faceGeometry, this.frontMat);
-    this.frontMesh.position.set(0, 0, CARD_THICKNESS / 2 + 0.001);
+    this.frontMesh.position.set(0, 0, CARD_THICKNESS / 2 + 0.005);
     
     // Manually fix UVs for the face geometry to ensure they are [0, 1]
     const pos = faceGeometry.attributes.position;
@@ -116,9 +116,9 @@ export class Card3D {
     this.group.add(this.frontMesh);
 
     // Back face
-    const backMat = new THREE.MeshStandardMaterial({ color: 0xb20000, transparent: true, opacity: 1 });
+    const backMat = new THREE.MeshStandardMaterial({ color: 0xb20000, transparent: false, opacity: 1 });
     const backMesh = new THREE.Mesh(faceGeometry, backMat);
-    backMesh.position.set(0, 0, -CARD_THICKNESS / 2 - 0.001);
+    backMesh.position.set(0, 0, -CARD_THICKNESS / 2 - 0.005);
     backMesh.rotation.set(0, Math.PI, 0);
     this.group.add(backMesh);
   }

@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { getRandomCards, getArtworkUrl } from './services/marvelCdb'
 
 export type RadialSlice = 'n' | 'e' | 's' | 'w' | 'c' | null
 
@@ -51,11 +50,12 @@ export interface GameState {
   setRadialHover: (slice: RadialSlice) => void
   createDeck: (card1Id: string, card2Id: string) => void
   addCardToDeck: (cardId: string, deckId: string) => void
+  addCardUnderDeck: (cardId: string, deckId: string) => void
   addDeckToDeck: (sourceDeckId: string, targetDeckId: string) => void
   removeTopCardFromDeck: (deckId: string) => string | null
   moveDeck: (id: string, position?: [number, number, number], rotation?: [number, number, number]) => void
   dissolveDeck: (deckId: string) => void
-  loadRandomCards: () => Promise<void>
+
 }
 
 export const useGameStore = create<GameState>((set) => ({
@@ -86,13 +86,13 @@ export const useGameStore = create<GameState>((set) => ({
   setPreviewCard: (id) => set({ previewCardId: id }),
   setFocusedCard: (id) => set({ focusedCardId: id }),
   cards: [
-    // Initial mock data to match the reference image: some cards on table, some in hand
-    { id: 'card-1', location: 'table', position: [-2, 0, -1], rotation: [0, 0, 0], faceUp: true },
-    { id: 'card-2', location: 'table', position: [-2, 0, 2], rotation: [0, 0, 0], faceUp: true },
-    { id: 'card-3', location: 'hand', position: [0, 0, 0], rotation: [0, 0, 0], faceUp: false },
-    { id: 'card-4', location: 'hand', position: [0, 0, 0], rotation: [0, 0, 0], faceUp: false },
-    { id: 'card-5', location: 'hand', position: [0, 0, 0], rotation: [0, 0, 0], faceUp: false },
-    { id: 'card-6', location: 'hand', position: [0, 0, 0], rotation: [0, 0, 0], faceUp: false },
+    // Hardcoded test cards with fixed Marvel card IDs for consistent testing
+    { id: 'card-1', location: 'table', position: [-2, 0, -1], rotation: [0, 0, 0], faceUp: true, name: 'Spider-Man', code: '01001a', artworkUrl: 'https://images.weserv.nl/?url=marvelcdb.com/bundles/cards/01001a.png' },
+    { id: 'card-2', location: 'table', position: [-2, 0, 2], rotation: [0, 0, 0], faceUp: true, name: 'Captain Marvel', code: '01010a', artworkUrl: 'https://images.weserv.nl/?url=marvelcdb.com/bundles/cards/01010a.png' },
+    { id: 'card-3', location: 'hand', position: [0, 0, 0], rotation: [0, 0, 0], faceUp: false, name: 'Iron Man', code: '01029a', artworkUrl: 'https://images.weserv.nl/?url=marvelcdb.com/bundles/cards/01029a.png' },
+    { id: 'card-4', location: 'hand', position: [0, 0, 0], rotation: [0, 0, 0], faceUp: false, name: 'Black Panther', code: '01040a', artworkUrl: 'https://images.weserv.nl/?url=marvelcdb.com/bundles/cards/01040a.png' },
+    { id: 'card-5', location: 'hand', position: [0, 0, 0], rotation: [0, 0, 0], faceUp: false, name: 'She-Hulk', code: '01019a', artworkUrl: 'https://images.weserv.nl/?url=marvelcdb.com/bundles/cards/01019a.png' },
+    { id: 'card-6', location: 'hand', position: [0, 0, 0], rotation: [0, 0, 0], faceUp: false, name: 'Black Cat', code: '01002', artworkUrl: 'https://images.weserv.nl/?url=marvelcdb.com/bundles/cards/01002.png' },
   ],
   decks: [],
   moveCard: (id, location, position, rotation) =>
@@ -156,6 +156,19 @@ export const useGameStore = create<GameState>((set) => ({
             : d
         ),
         cards: state.cards.map(c => 
+          c.id === cardId ? { ...c, location: 'deck' } : c
+        )
+      }
+    }),
+  addCardUnderDeck: (cardId, deckId) =>
+    set((state) => {
+      return {
+        decks: state.decks.map(d =>
+          d.id === deckId
+            ? { ...d, cardIds: [cardId, ...d.cardIds] } // Add to bottom
+            : d
+        ),
+        cards: state.cards.map(c =>
           c.id === cardId ? { ...c, location: 'deck' } : c
         )
       }
@@ -232,22 +245,5 @@ export const useGameStore = create<GameState>((set) => ({
         )
       }
     }),
-  loadRandomCards: async () => {
-    const marvelCards = await getRandomCards(6)
-    
-    set((state) => ({
-      cards: state.cards.map((c, i) => {
-        if (i < marvelCards.length) {
-          const mc = marvelCards[i]
-          return {
-            ...c,
-            name: mc.name,
-            code: mc.code,
-            artworkUrl: getArtworkUrl(mc)
-          }
-        }
-        return c
-      })
-    }))
-  },
+
 }))

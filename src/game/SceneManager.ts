@@ -57,7 +57,7 @@ export class SceneManager {
     this.camera.lookAt(0, 0, 0);
 
     // Setup Renderer
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, logarithmicDepthBuffer: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.shadowMap.enabled = true;
@@ -191,9 +191,9 @@ export class SceneManager {
             deck.cardIds.forEach((id, idx) => {
              const cb = this.cards.get(id);
              if (cb) {
-                cb.group.position.set(hit.x, DRAG_PLANE_Y + idx * 0.05, hit.z);
-                const wobX = (idx % 2 === 0 ? 1 : -1) * 0.02 * idx;
-                const wobZ = (idx % 2 === 0 ? -1 : 1) * 0.01 * idx;
+                cb.group.position.set(hit.x, DRAG_PLANE_Y + idx * 0.03, hit.z);
+                const wobX = (idx % 2 === 0 ? 1 : -1) * 0.005;
+                const wobZ = (idx % 2 === 0 ? -1 : 1) * 0.003;
                 cb.group.rotation.set(-Math.PI / 2 + 0.3 + wobX, deck.rotation[1] + wobZ, deck.rotation[2]);
                 cb.group.scale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE);
              }
@@ -259,11 +259,20 @@ export class SceneManager {
         const cardId = obj?.userData?.cardId;
         if (cardId && store.hoveredCardId !== cardId) {
           store.setHoveredCard(cardId, e.clientX);
+          
+          // Focus hand cards on hover for desktop
+          const card = store.cards.find(c => c.id === cardId);
+          if (card?.location === 'hand') {
+            store.setFocusedCard(cardId);
+          } else {
+            store.setFocusedCard(null);
+          }
         }
       } else {
         document.body.style.cursor = 'auto';
         if (store.hoveredCardId !== null) {
           store.setHoveredCard(null);
+          store.setFocusedCard(null);
         }
       }
     }
@@ -470,6 +479,14 @@ export class SceneManager {
        
        if (dropTarget?.type === 'deck') {
           store.addDeckToDeck(this.activeDragDeckId, dropTarget.id);
+       } else if (dropTarget?.type === 'card') {
+          // Drop deck onto a single card: add the card to the bottom of the deck
+          store.addCardUnderDeck(dropTarget.id, this.activeDragDeckId);
+          // Move deck to the card's position
+          const targetCard = store.cards.find(c => c.id === dropTarget.id);
+          if (targetCard) {
+            store.moveDeck(this.activeDragDeckId, [...targetCard.position]);
+          }
        } else {
           store.moveDeck(this.activeDragDeckId, [this.lastDragPos.x, 0, this.lastDragPos.z]);
        }
@@ -611,9 +628,10 @@ export class SceneManager {
         card3D.targetScale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE);
       } else if (inDeck && deck) {
         const indexInDeck = deck.cardIds.indexOf(cardData.id);
-        const yOffset = 0.01 + lift + indexInDeck * 0.05; // Increased spacing to 0.05
-        const wobX = (indexInDeck % 2 === 0 ? 1 : -1) * 0.02 * indexInDeck;
-        const wobZ = (indexInDeck % 2 === 0 ? -1 : 1) * 0.01 * indexInDeck;
+        const yOffset = 0.01 + lift + indexInDeck * 0.03; // Card thickness + small gap
+        // Clamp wobble to very small constant values to prevent clipping
+        const wobX = (indexInDeck % 2 === 0 ? 1 : -1) * 0.005;
+        const wobZ = (indexInDeck % 2 === 0 ? -1 : 1) * 0.003;
         
         card3D.targetPosition.set(deck.position[0], yOffset, deck.position[2]);
         const rotX = cardData.faceUp ? -Math.PI / 2 : Math.PI / 2;
