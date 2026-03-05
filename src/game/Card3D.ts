@@ -13,6 +13,8 @@ export class Card3D {
   targetQuaternion: THREE.Quaternion;
   targetScale: THREE.Vector3;
   
+  basePosition: THREE.Vector3;
+  
   isDragging: boolean = false;
   ghostGroup: THREE.Group;
   ghostTargetOpacity: number = 0;
@@ -33,6 +35,7 @@ export class Card3D {
     this.targetPosition = new THREE.Vector3();
     this.targetQuaternion = new THREE.Quaternion();
     this.targetScale = new THREE.Vector3(1, 1, 1);
+    this.basePosition = new THREE.Vector3();
     
     this.setupMeshes();
     this.setupGhostMeshes();
@@ -41,8 +44,8 @@ export class Card3D {
     if (cardData.location === 'table') {
       this.targetPosition.set(cardData.position[0], CARD_THICKNESS / 2, cardData.position[2]);
       this.targetScale.set(1, 1, 1);
-      const rotX = cardData.faceUp ? -Math.PI / 2 : Math.PI / 2;
-      this.targetQuaternion.setFromEuler(new THREE.Euler(rotX, cardData.rotation[1], cardData.rotation[2]));
+      const flipYRot = cardData.faceUp ? 0 : Math.PI;
+      this.targetQuaternion.setFromEuler(new THREE.Euler(-Math.PI / 2, cardData.rotation[1] + flipYRot, cardData.rotation[2]));
     } else {
       this.targetPosition.set(0, -10, 0);
       this.targetScale.set(0.375, 0.375, 0.375);
@@ -50,6 +53,7 @@ export class Card3D {
     }
     
     // Snap to initial positions immediately
+    this.basePosition.copy(this.targetPosition);
     this.group.position.copy(this.targetPosition);
     this.group.quaternion.copy(this.targetQuaternion);
     this.group.scale.copy(this.targetScale);
@@ -203,16 +207,40 @@ export class Card3D {
       }
     });
 
-    if (this.isDragging) return;
+    if (this.isDragging) {
+      // Keep basePosition synced with the manual dragging position
+      this.basePosition.copy(this.group.position);
+      return;
+    }
 
     // Simulate spring-like damping with lerp/slerp
     const tension = 15;
-    this.group.position.lerp(this.targetPosition, tension * delta);
-    this.group.quaternion.slerp(this.targetQuaternion, tension * delta);
-    this.group.scale.lerp(this.targetScale, tension * delta);
+    const currentSpeed = tension * delta;
+    
+    // Add dynamic lift if the card is actively rotating significantly
+    const angleDiff = this.group.quaternion.angleTo(this.targetQuaternion);
+    // angleDiff is 0 when fully rested, up to PI when 180deg flipped
+    // We want the peak of the arc to be at PI/2 difference.
+    // Sin(angleDiff) gives us a curve that peaks at PI/2 and goes to 0 at 0 and PI.
+    const flipArcHeight = 1.6; // How high it lifts
+    
+    // Lerp base position
+    this.basePosition.lerp(this.targetPosition, currentSpeed);
+    this.group.quaternion.slerp(this.targetQuaternion, currentSpeed);
+    this.group.scale.lerp(this.targetScale, currentSpeed);
+    
+    // Apply temporary lift if rotating (e.g., flipping)
+    let currentLift = 0;
+    if (angleDiff > 0.01) {
+       currentLift = Math.sin(angleDiff) * flipArcHeight;
+    }
+    
+    this.group.position.copy(this.basePosition);
+    this.group.position.y += currentLift;
   }
 
   updateTransform() {
+    this.basePosition.copy(this.targetPosition);
     this.group.position.copy(this.targetPosition);
     this.group.quaternion.copy(this.targetQuaternion);
     this.group.scale.copy(this.targetScale);

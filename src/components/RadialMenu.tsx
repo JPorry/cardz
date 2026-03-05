@@ -33,6 +33,11 @@ export function RadialMenu() {
   const closeMenu = useGameStore(state => state.closeRadialMenu)
   const setHover = useGameStore(state => state.setRadialHover)
   const setPreviewCard = useGameStore(state => state.setPreviewCard)
+  const tapCard = useGameStore(state => state.tapCard)
+  const flipCard = useGameStore(state => state.flipCard)
+  const tapDeck = useGameStore(state => state.tapDeck)
+  const flipDeck = useGameStore(state => state.flipDeck)
+  const decks = useGameStore(state => state.decks)
   // Additional actions can be mapped to store functions
 
   if (!radialMenu.isOpen) return null
@@ -51,11 +56,36 @@ export function RadialMenu() {
   const centerRadius = 25
 
   const handleSliceClick = (id: RadialSlice) => {
-    console.log(`Action ${id} executed on card ${radialMenu.cardId}`);
-    // Example: flip card on center click or North click
-    if (id === 'c' && radialMenu.cardId) {
-       setPreviewCard(radialMenu.cardId)
+    console.log(`Action ${id} executed on item ${radialMenu.itemId} of type ${radialMenu.itemType}`);
+    const { itemId, itemType } = radialMenu;
+
+    if (!itemId || !itemType) {
+      closeMenu();
+      return;
     }
+
+    if (itemType === 'card') {
+      if (id === 'c') {
+         setPreviewCard(itemId)
+      } else if (id === 'e') {
+         tapCard(itemId)
+      } else if (id === 's') {
+         flipCard(itemId)
+      }
+    } else if (itemType === 'deck') {
+      if (id === 'c') {
+         // Preview the top card of the deck
+         const deck = decks.find(d => d.id === itemId);
+         if (deck && deck.cardIds.length > 0) {
+            setPreviewCard(deck.cardIds[deck.cardIds.length - 1]);
+         }
+      } else if (id === 'e') {
+         tapDeck(itemId)
+      } else if (id === 's') {
+         flipDeck(itemId)
+      }
+    }
+    
     closeMenu()
   }
 
