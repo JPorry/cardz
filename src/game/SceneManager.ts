@@ -259,8 +259,11 @@ export class SceneManager {
         
         // Maintain face-up/down rotation during drag
         const cardModel = store.cards.find(c => c.id === this.activeDragCardId);
-        const flipYRot = cardModel?.faceUp ? 0 : Math.PI;
-        card3D.group.rotation.set(-Math.PI / 2 + 0.3, flipYRot, 0); // Tilt slightly to reveal the drop spot
+        // Hand cards visually act face-up while dragging
+        const isFromHand = cardModel?.location === 'hand';
+        const flipYRot = (cardModel?.faceUp || isFromHand) ? 0 : Math.PI;
+        const tapRot = cardModel?.tapped ? -Math.PI / 2 : 0;
+        card3D.group.rotation.set(-Math.PI / 2 + 0.3, flipYRot, tapRot); // Tilt slightly to reveal the drop spot
         
         card3D.group.scale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE);
         
@@ -401,7 +404,8 @@ export class SceneManager {
                         const stackWobbleRot = (idx % 2 === 0 ? 1 : -1) * 0.015 * idx;
                         const cardModel = store.cards.find(c => c.id === id);
                         const flipYRot = cardModel?.faceUp ? 0 : Math.PI;
-                        cb.group.rotation.set(-Math.PI / 2 + 0.3, deck.rotation[1] + stackWobbleRot + flipYRot, deck.rotation[2]);
+                        const tapRot = cardModel?.tapped ? -Math.PI / 2 : 0;
+                        cb.group.rotation.set(-Math.PI / 2 + 0.3, deck.rotation[1] + stackWobbleRot + flipYRot, deck.rotation[2] + tapRot);
                      }
                   }
                 });
@@ -597,6 +601,9 @@ export class SceneManager {
        const dropInHand = this.pointer.y < -0.5;
        const dropTarget = this.findDropTarget(this.lastDragPos.x, this.lastDragPos.z, [this.activeDragCardId]);
 
+       const cardModel = store.cards.find(c => c.id === this.activeDragCardId);
+       const fromHand = cardModel?.location === 'hand';
+
        if (!dropInHand) {
           const lane = this.findLaneAtPosition(this.lastDragPos.x, this.lastDragPos.z);
           const region = this.findRegionAtPosition(this.lastDragPos.x, this.lastDragPos.z);
@@ -631,6 +638,10 @@ export class SceneManager {
              // Dropping outside any lane — remove from lane if it was in one
              store.removeFromLane(this.activeDragCardId);
              store.moveCard(this.activeDragCardId, 'table', [this.lastDragPos.x, 0, this.lastDragPos.z], [0, 0, 0]);
+          }
+
+          if (fromHand && cardModel && !cardModel.faceUp) {
+             store.flipCard(this.activeDragCardId);
           }
        } else {
            const c = store.cards.find(c => c.id === this.activeDragCardId);
