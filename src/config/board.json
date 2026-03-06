@@ -21,7 +21,7 @@
       "label": "Enemy Area",
       "x": 0,
       "y": 4.5,
-      "width": 30.2,
+      "width": 26,
       "depth": 4,
       "cardSpacing": 2.4,
       "flipped": false
@@ -83,6 +83,15 @@
       "width": 3.625,
       "depth": 4,
       "flipped": false
+    },
+    {
+      "id": "region-nemesis-deck",
+      "label": "Nemesis Deck",
+      "x": 26.575,
+      "y": 4.5,
+      "width": 3.625,
+      "depth": 4,
+      "flipped": true
     },
     {
       "id": "region-player-deck",

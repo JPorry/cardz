@@ -4,6 +4,11 @@ export interface MarvelCard {
   imagesrc?: string;
   pack_code: string;
   type_code: string;
+  card_set_code?: string;
+  text?: string;
+  stage?: number | string | null;
+  linked_card?: MarvelCard;
+  double_sided?: boolean;
 }
 
 const API_BASE_URL = 'https://marvelcdb.com/api/public';
@@ -21,9 +26,26 @@ export async function fetchAllCards(): Promise<MarvelCard[]> {
   }
 }
 
-export function getArtworkUrl(card: MarvelCard): string {
-  // Convert something like "01001a" to "01001A" to match Cerebro storage conventions
-  const code = card.code.replace(/[a-z]$/, (match) => match.toUpperCase());
+function getCerebroCode(card: MarvelCard, face: 'front' | 'back' = 'front'): string {
+  if (/[a-z]$/.test(card.code)) {
+    return card.code.replace(/[a-z]$/, (match) => match.toUpperCase());
+  }
+
+  if (card.double_sided) {
+    return `${card.code}${face === 'front' ? 'A' : 'B'}`;
+  }
+
+  return card.code;
+}
+
+export function getArtworkUrl(card: MarvelCard, face: 'front' | 'back' = 'front'): string {
+  const isIdentityCard = card.type_code === 'hero' || card.type_code === 'alter_ego'
+  const imagePath = face === 'front' ? card.imagesrc : card.linked_card?.imagesrc
+  if (isIdentityCard && imagePath) {
+    return `https://images.weserv.nl/?url=https://marvelcdb.com${imagePath}`
+  }
+
+  const code = getCerebroCode(card, face);
   // Use weserv.nl as an image proxy to bypass CORS
   return `https://images.weserv.nl/?url=https://cerebrodatastorage.blob.core.windows.net/cerebro-cards/official/${code}.jpg`;
 }

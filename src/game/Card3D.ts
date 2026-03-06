@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { CardState } from '../store';
+import { getCardTableEuler } from '../utils/cardOrientation';
 
 const CARD_WIDTH = 1.44;
 const CARD_HEIGHT = 2.09;
@@ -18,6 +19,8 @@ export class Card3D {
   isDragging: boolean = false;
   ghostGroup: THREE.Group;
   ghostTargetOpacity: number = 0;
+  selectionMesh: THREE.Mesh;
+  selectionMaterial: THREE.MeshBasicMaterial;
 
   frontMesh?: THREE.Mesh;
   frontMat?: THREE.MeshStandardMaterial;
@@ -25,6 +28,8 @@ export class Card3D {
   backMat?: THREE.MeshStandardMaterial;
   currentArtworkUrl?: string;
   currentBackArtworkUrl?: string;
+  currentArtworkRotation: number = 0;
+  currentBackArtworkRotation: number = 0;
 
   constructor(cardData: CardState) {
     this.id = cardData.id;
@@ -42,13 +47,15 @@ export class Card3D {
     
     this.setupMeshes();
     this.setupGhostMeshes();
+    this.selectionMesh = this.createSelectionMesh()
+    this.selectionMaterial = this.selectionMesh.material as THREE.MeshBasicMaterial
+    this.group.add(this.selectionMesh)
     
     // Initial State Setup
     if (cardData.location === 'table') {
       this.targetPosition.set(cardData.position[0], CARD_THICKNESS / 2, cardData.position[2]);
       this.targetScale.set(1, 1, 1);
-      const flipYRot = cardData.faceUp ? 0 : Math.PI;
-      this.targetQuaternion.setFromEuler(new THREE.Euler(-Math.PI / 2, cardData.rotation[1] + flipYRot, cardData.rotation[2]));
+      this.targetQuaternion.setFromEuler(getCardTableEuler(cardData));
     } else {
       this.targetPosition.set(0, -10, 0);
       this.targetScale.set(0.3, 0.3, 0.3); // 0.375 / 1.25
@@ -64,6 +71,7 @@ export class Card3D {
     // Custom user data for raycasting identification
     this.group.userData = { cardId: this.id, isCard: true };
     this.group.children.forEach(c => c.userData = this.group.userData);
+
   }
 
   private createRoundedRectShape(width: number, height: number, radius: number): THREE.Shape {
@@ -141,6 +149,8 @@ export class Card3D {
           texture.minFilter = THREE.LinearFilter;
           texture.magFilter = THREE.LinearFilter;
           texture.anisotropy = 4;
+          this.currentArtworkRotation = this.getTextureRotation(texture, false);
+          this.applyTextureRotation(texture, this.currentArtworkRotation);
           this.frontMat.map = texture;
           this.frontMat.color.set(0xffffff); // Ensure it's white to show texture clearly
           this.frontMat.needsUpdate = true;
@@ -158,12 +168,34 @@ export class Card3D {
           texture.minFilter = THREE.LinearFilter;
           texture.magFilter = THREE.LinearFilter;
           texture.anisotropy = 4;
+          this.currentBackArtworkRotation = this.getTextureRotation(texture, true);
+          this.applyTextureRotation(texture, this.currentBackArtworkRotation);
           this.backMat.map = texture;
           this.backMat.color.set(0xffffff); // Ensure it's white to show texture clearly
           this.backMat.needsUpdate = true;
         }
       });
     }
+  }
+
+  private applyTextureRotation(texture: THREE.Texture, rotation: number) {
+    texture.center.set(0.5, 0.5);
+    texture.rotation = rotation;
+    texture.needsUpdate = true;
+  }
+
+  private getTextureRotation(texture: THREE.Texture, isBack: boolean) {
+    const image = texture.image as { width?: number, height?: number } | undefined;
+    if (!image?.width || !image?.height) {
+      return isBack ? this.currentBackArtworkRotation : this.currentArtworkRotation;
+    }
+
+    const isLandscape = image.width > image.height;
+    if (!isLandscape) {
+      return 0;
+    }
+
+    return isBack ? Math.PI / 2 : -Math.PI / 2;
   }
 
   private setupGhostMeshes() {
@@ -190,11 +222,36 @@ export class Card3D {
     backMesh.rotation.set(0, Math.PI, 0);
     this.ghostGroup.add(backMesh);
   }
+
+  private createSelectionMesh() {
+    const selectionShape = this.createRoundedRectShape(CARD_WIDTH * 1.08, CARD_HEIGHT * 1.08, 0.14)
+    const selectionGeometry = new THREE.ShapeGeometry(selectionShape)
+    const selectionMaterial = new THREE.MeshBasicMaterial({
+      color: 0x5aa8ff,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+    const selectionMesh = new THREE.Mesh(selectionGeometry, selectionMaterial)
+    selectionMesh.position.set(0, 0, CARD_THICKNESS / 2 + 0.003)
+    selectionMesh.renderOrder = 5
+    selectionMesh.visible = false
+    return selectionMesh
+  }
+
+  setSelected(selected: boolean, stackSelected = false) {
+    this.selectionMesh.visible = selected
+    this.selectionMaterial.opacity = selected ? (stackSelected ? 0.42 : 0.34) : 0
+    this.selectionMaterial.color.setHex(stackSelected ? 0x73b8ff : 0x4a90ff)
+    this.selectionMesh.scale.set(stackSelected ? 1.06 : 1, stackSelected ? 1.06 : 1, 1)
+  }
   
   setGhostColor(colorHex: number) {
-    this.ghostGroup.children.forEach((child: any) => {
-      if (child.material && child.material.color) {
-        child.material.color.setHex(colorHex);
+    this.ghostGroup.children.forEach((child) => {
+      const material = child instanceof THREE.Mesh ? child.material : null;
+      if (material && 'color' in material) {
+        material.color.setHex(colorHex);
       }
     });
   }
@@ -221,9 +278,10 @@ export class Card3D {
 
   update(delta: number) {
     // Smooth lerping for the ghost UI opacity
-    this.ghostGroup.children.forEach((mesh: any) => {
-      if (mesh.material) {
-        mesh.material.opacity = THREE.MathUtils.lerp(mesh.material.opacity, this.ghostTargetOpacity, 15 * delta);
+    this.ghostGroup.children.forEach((mesh) => {
+      const material = mesh instanceof THREE.Mesh ? mesh.material : null;
+      if (material && 'opacity' in material) {
+        material.opacity = THREE.MathUtils.lerp(material.opacity, this.ghostTargetOpacity, 15 * delta);
       }
     });
 

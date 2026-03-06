@@ -1,4 +1,4 @@
-import { BOARD_CONFIG, toWorldPos, INITIAL_LANES, INITIAL_REGIONS } from './src/config/board.ts';
+import { BOARD_CONFIG, INITIAL_LANES, INITIAL_REGIONS } from './src/config/board.ts';
 
 console.log("TABLE BOUNDS:");
 console.log("X: [-", BOARD_CONFIG.width / 2, ", ", BOARD_CONFIG.width / 2, "]");

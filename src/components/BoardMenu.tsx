@@ -8,7 +8,11 @@ const MENU_OPTIONS = [
   { id: 'help', label: 'Help', detail: 'Open the quick reference guide' },
 ];
 
-export function BoardMenu() {
+interface BoardMenuProps {
+  onStartNewGame: () => void
+}
+
+export function BoardMenu({ onStartNewGame }: BoardMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -65,7 +69,12 @@ export function BoardMenu() {
                 type="button"
                 className="board-menu__option"
                 role="menuitem"
-                onClick={() => setIsOpen(false)}
+                onClick={() => {
+                  setIsOpen(false)
+                  if (option.id === 'new-game') {
+                    onStartNewGame()
+                  }
+                }}
               >
                 <span className="board-menu__option-label">{option.label}</span>
                 <span className="board-menu__option-detail">{option.detail}</span>
