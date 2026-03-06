@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+import { INITIAL_LANES, INITIAL_REGIONS, toWorldPos } from './utils/boardUtils'
+import { getCardCenterOffsetBelowTitle, getTitleWorldHeight, LANE_TITLE_LAYOUT } from './utils/areaLayout'
 
 export type RadialSlice = 'n' | 'e' | 's' | 'w' | 'c' | null
 
@@ -21,6 +23,7 @@ export interface CardState {
   artworkUrl?: string
   name?: string
   code?: string
+  typeCode?: string
   laneId?: string
   regionId?: string
   tapped?: boolean
@@ -41,6 +44,7 @@ export interface LaneState {
   position: [number, number, number] // center of the lane
   width: number   // extent along X
   depth: number   // extent along Z
+  flipped: boolean
   cardSpacing: number // horizontal spacing between items
   itemOrder: string[] // ordered list of card/deck IDs in this lane
 }
@@ -51,6 +55,7 @@ export interface RegionState {
   position: [number, number, number]
   width: number
   depth: number
+  flipped: boolean
 }
 
 export interface GameState {
@@ -101,20 +106,51 @@ export interface GameState {
 
 // Helper to compute slot position at a given index in a lane (left-to-right)
 export function computeLaneSlotPosition(lane: LaneState, slotIndex: number): [number, number, number] {
-  const padding = 1.0; // inset from the left edge
+  const padding = 1.25; // inset from the left edge
   const leftEdge = lane.position[0] - lane.width / 2 + padding;
   const x = leftEdge + slotIndex * lane.cardSpacing;
-  const zOffset = 0.25; // Shift cards down to hug the bottom border
+  const labelWorldHeight = getTitleWorldHeight(
+    LANE_TITLE_LAYOUT.worldWidth,
+    LANE_TITLE_LAYOUT.canvasWidth,
+    LANE_TITLE_LAYOUT.canvasHeight,
+  );
+  const zOffset = getCardCenterOffsetBelowTitle(
+    lane.depth,
+    LANE_TITLE_LAYOUT.labelCenterOffset,
+    labelWorldHeight,
+  );
   return [x, lane.position[1], lane.position[2] + zOffset];
 }
 
 // Helper to compute insertion index from an X world position
 export function computeLaneInsertIndex(lane: LaneState, worldX: number, currentCount: number): number {
-  const padding = 1.0;
+  const padding = 1.25;
   const leftEdge = lane.position[0] - lane.width / 2 + padding;
   const relativeX = worldX - leftEdge;
   const index = Math.round(relativeX / lane.cardSpacing);
   return Math.max(0, Math.min(index, currentCount));
+}
+
+function getContainerFlippedDefault(
+  lanes: LaneState[],
+  regions: RegionState[],
+  laneId?: string,
+  regionId?: string,
+): boolean | undefined {
+  if (laneId) return lanes.find((lane) => lane.id === laneId)?.flipped;
+  if (regionId) return regions.find((region) => region.id === regionId)?.flipped;
+  return undefined;
+}
+
+function applyFaceStateFromContainer<T extends { faceUp: boolean }>(
+  item: T,
+  lanes: LaneState[],
+  regions: RegionState[],
+  laneId?: string,
+  regionId?: string,
+): T {
+  const flipped = getContainerFlippedDefault(lanes, regions, laneId, regionId);
+  return flipped === undefined ? item : { ...item, faceUp: !flipped };
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -150,34 +186,16 @@ export const useGameStore = create<GameState>((set, get) => ({
   setLanePreview: (laneId, index, itemId) => set({ lanePreviewLaneId: laneId, lanePreviewIndex: index, lanePreviewItemId: itemId }),
   cards: [
     // Hardcoded test cards with fixed Marvel card IDs for consistent testing
-    { id: 'card-1', location: 'table', position: [-2, 0, -1], rotation: [0, 0, 0], faceUp: true, name: 'Spider-Man', code: '01001a', artworkUrl: 'https://images.weserv.nl/?url=marvelcdb.com/bundles/cards/01001a.png' },
-    { id: 'card-2', location: 'table', position: [-2, 0, 2], rotation: [0, 0, 0], faceUp: true, name: 'Captain Marvel', code: '01010a', artworkUrl: 'https://images.weserv.nl/?url=marvelcdb.com/bundles/cards/01010a.png' },
-    { id: 'card-3', location: 'hand', position: [0, 0, 0], rotation: [0, 0, 0], faceUp: false, name: 'Iron Man', code: '01029a', artworkUrl: 'https://images.weserv.nl/?url=marvelcdb.com/bundles/cards/01029a.png' },
-    { id: 'card-4', location: 'hand', position: [0, 0, 0], rotation: [0, 0, 0], faceUp: false, name: 'Black Panther', code: '01040a', artworkUrl: 'https://images.weserv.nl/?url=marvelcdb.com/bundles/cards/01040a.png' },
-    { id: 'card-5', location: 'hand', position: [0, 0, 0], rotation: [0, 0, 0], faceUp: false, name: 'She-Hulk', code: '01019a', artworkUrl: 'https://images.weserv.nl/?url=marvelcdb.com/bundles/cards/01019a.png' },
-    { id: 'card-6', location: 'hand', position: [0, 0, 0], rotation: [0, 0, 0], faceUp: false, name: 'Black Cat', code: '01002', artworkUrl: 'https://images.weserv.nl/?url=marvelcdb.com/bundles/cards/01002.png' },
+    { id: 'card-1', location: 'table', position: toWorldPos(0.4, 7.65), rotation: [0, 0, 0], faceUp: true, name: 'Spider-Man', code: '01001a', typeCode: 'hero', artworkUrl: 'https://images.weserv.nl/?url=https://cerebrodatastorage.blob.core.windows.net/cerebro-cards/official/01001A.jpg' },
+    { id: 'card-2', location: 'table', position: toWorldPos(3.4, 7.65), rotation: [0, 0, 0], faceUp: true, name: 'Captain Marvel', code: '01010a', typeCode: 'hero', artworkUrl: 'https://images.weserv.nl/?url=https://cerebrodatastorage.blob.core.windows.net/cerebro-cards/official/01010A.jpg' },
+    { id: 'card-3', location: 'hand', position: [0, 0, 0], rotation: [0, 0, 0], faceUp: false, name: 'Iron Man', code: '01029a', typeCode: 'villain', artworkUrl: 'https://images.weserv.nl/?url=https://cerebrodatastorage.blob.core.windows.net/cerebro-cards/official/01029A.jpg' },
+    { id: 'card-4', location: 'hand', position: [0, 0, 0], rotation: [0, 0, 0], faceUp: false, name: 'Black Panther', code: '01040a', typeCode: 'treachery', artworkUrl: 'https://images.weserv.nl/?url=https://cerebrodatastorage.blob.core.windows.net/cerebro-cards/official/01040A.jpg' },
+    { id: 'card-5', location: 'hand', position: [0, 0, 0], rotation: [0, 0, 0], faceUp: false, name: 'She-Hulk', code: '01019a', typeCode: 'upgrade', artworkUrl: 'https://images.weserv.nl/?url=https://cerebrodatastorage.blob.core.windows.net/cerebro-cards/official/01019A.jpg' },
+    { id: 'card-6', location: 'hand', position: [0, 0, 0], rotation: [0, 0, 0], faceUp: false, name: 'Black Cat', code: '01002', typeCode: 'upgrade', artworkUrl: 'https://images.weserv.nl/?url=https://cerebrodatastorage.blob.core.windows.net/cerebro-cards/official/01002.jpg' },
   ],
   decks: [],
-  lanes: [
-    {
-      id: 'lane-player-area',
-      label: 'Player Area',
-      position: [0, 0, 3.5],
-      width: 16,
-      depth: 2.7,
-      cardSpacing: 2.0,
-      itemOrder: [],
-    },
-  ],
-  regions: [
-    {
-      id: 'region-main-scheme',
-      label: 'Main Scheme',
-      position: [-6, 0, -2.5],
-      width: 2.5,
-      depth: 3.5,
-    }
-  ],
+  lanes: INITIAL_LANES.map(lane => ({ ...lane, itemOrder: [] })),
+  regions: INITIAL_REGIONS,
   activeLaneId: null,
   activeRegionId: null,
   lanePreviewLaneId: null,
@@ -188,7 +206,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     set((state) => ({
       cards: state.cards.map((c) => {
         if (c.id !== id) return c
-        return {
+        return applyFaceStateFromContainer({
           ...c,
           location,
           laneId: laneId || undefined,
@@ -196,7 +214,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           // Always create fresh array references to avoid shared state bugs during React renders
           position: position ? [...position] : [...c.position],
           rotation: rotation ? [...rotation] : [...c.rotation],
-        }
+        }, state.lanes, state.regions, laneId, regionId)
       }),
     }))
   },
@@ -247,6 +265,9 @@ export const useGameStore = create<GameState>((set, get) => ({
       const c1 = state.cards.find(c => c.id === card1Id)
       const c2 = state.cards.find(c => c.id === card2Id)
       if (!c1 || !c2) return state
+
+      const laneId = c2.laneId;
+      const regionId = c2.regionId;
       
       const newDeckId = `deck-${Date.now()}`
       const newDeck: DeckState = {
@@ -254,8 +275,8 @@ export const useGameStore = create<GameState>((set, get) => ({
         position: [...c2.position], // place at card 2 position
         rotation: [...c2.rotation],
         cardIds: [card2Id, card1Id], // card 2 on bottom, card 1 on top
-        laneId: c2.laneId, // Inherit the lane from the target card
-        regionId: c2.regionId // Inherit the region from the target card
+        laneId, // Inherit the lane from the target card
+        regionId // Inherit the region from the target card
       }
       
       return {
@@ -276,13 +297,20 @@ export const useGameStore = create<GameState>((set, get) => ({
         decks: [...state.decks, newDeck],
         cards: state.cards.map(c => 
           (c.id === card1Id || c.id === card2Id) 
-            ? { ...c, location: 'deck', laneId: undefined, regionId: undefined } 
+            ? applyFaceStateFromContainer(
+                { ...c, location: 'deck', laneId: undefined, regionId: undefined },
+                state.lanes,
+                state.regions,
+                laneId,
+                regionId,
+              )
             : c
         )
       }
     }),
   addCardToDeck: (cardId, deckId) =>
     set((state) => {
+      const targetDeck = state.decks.find((d) => d.id === deckId);
       return {
         lanes: state.lanes.map(lane => ({
           ...lane,
@@ -294,12 +322,21 @@ export const useGameStore = create<GameState>((set, get) => ({
             : d
         ),
         cards: state.cards.map(c => 
-          c.id === cardId ? { ...c, location: 'deck', laneId: undefined, regionId: undefined } : c
+          c.id === cardId
+            ? applyFaceStateFromContainer(
+                { ...c, location: 'deck', laneId: undefined, regionId: undefined },
+                state.lanes,
+                state.regions,
+                targetDeck?.laneId,
+                targetDeck?.regionId,
+              )
+            : c
         )
       }
     }),
   addCardUnderDeck: (cardId, deckId) =>
     set((state) => {
+      const targetDeck = state.decks.find((d) => d.id === deckId);
       return {
         lanes: state.lanes.map(lane => ({
           ...lane,
@@ -311,13 +348,22 @@ export const useGameStore = create<GameState>((set, get) => ({
             : d
         ),
         cards: state.cards.map(c =>
-          c.id === cardId ? { ...c, location: 'deck', laneId: undefined, regionId: undefined } : c
+          c.id === cardId
+            ? applyFaceStateFromContainer(
+                { ...c, location: 'deck', laneId: undefined, regionId: undefined },
+                state.lanes,
+                state.regions,
+                targetDeck?.laneId,
+                targetDeck?.regionId,
+              )
+            : c
         )
       }
     }),
   addDeckToDeck: (sourceDeckId, targetDeckId) =>
     set((state) => {
       const sourceDeck = state.decks.find(d => d.id === sourceDeckId)
+      const targetDeck = state.decks.find(d => d.id === targetDeckId)
       if (!sourceDeck) return state
       
       return {
@@ -333,7 +379,20 @@ export const useGameStore = create<GameState>((set, get) => ({
             d.id === targetDeckId
               ? { ...d, cardIds: [...d.cardIds, ...sourceDeck.cardIds] } // target on bottom, source on top
               : d
-          )
+          ),
+        cards: targetDeck
+          ? state.cards.map((card) => (
+              sourceDeck.cardIds.includes(card.id)
+                ? applyFaceStateFromContainer(
+                    { ...card },
+                    state.lanes,
+                    state.regions,
+                    targetDeck.laneId,
+                    targetDeck.regionId,
+                  )
+                : card
+            ))
+          : state.cards,
       }
     }),
   removeTopCardFromDeck: (deckId: string) => {
@@ -379,18 +438,33 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
   moveDeck: (id: string, position?: [number, number, number], rotation?: [number, number, number], laneId?: string, regionId?: string) => {
     console.log(`[Store] moveDeck: ${id}, laneId: ${laneId}, regionId: ${regionId}, pos: ${position}`);
-    set((state) => ({
-      decks: state.decks.map((d: DeckState) => {
-        if (d.id !== id) return d
-        return {
-          ...d,
-          laneId: laneId || undefined,
-          regionId: regionId || undefined,
-          position: position ? [...position] : [...d.position],
-          rotation: rotation ? [...rotation] : [...d.rotation],
-        }
-      }),
-    }))
+    set((state) => {
+      const deck = state.decks.find((d) => d.id === id);
+      const cardIds = deck?.cardIds ?? [];
+      return {
+        decks: state.decks.map((d: DeckState) => {
+          if (d.id !== id) return d
+          return {
+            ...d,
+            laneId: laneId || undefined,
+            regionId: regionId || undefined,
+            position: position ? [...position] : [...d.position],
+            rotation: rotation ? [...rotation] : [...d.rotation],
+          }
+        }),
+        cards: state.cards.map((card) => (
+          cardIds.includes(card.id)
+            ? applyFaceStateFromContainer(
+                { ...card },
+                state.lanes,
+                state.regions,
+                laneId,
+                regionId,
+              )
+            : card
+        )),
+      };
+    })
   },
   dissolveDeck: (deckId: string) =>
     set((state) => {

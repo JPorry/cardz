@@ -1,13 +1,14 @@
 import * as THREE from 'three';
+import { BOARD_CONFIG } from '../config/board';
 
 export class Table3D {
   mesh: THREE.Mesh;
 
   constructor() {
-    const width = 28;
-    const depth = 18;
+    const width = BOARD_CONFIG.width;
+    const depth = BOARD_CONFIG.depth;
     const thickness = 0.8;
-    const cornerRadius = 1.5;
+    const cornerRadius = 1.7;
 
     // Create a rounded rectangle shape
     const shape = new THREE.Shape();

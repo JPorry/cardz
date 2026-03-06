@@ -22,14 +22,33 @@ export async function fetchAllCards(): Promise<MarvelCard[]> {
 }
 
 export function getArtworkUrl(card: MarvelCard): string {
-  let url = '';
-  if (card.imagesrc) {
-    url = `marvelcdb.com${card.imagesrc}`;
-  } else {
-    url = `marvelcdb.com/bundles/cards/${card.code}.png`;
-  }
+  // Convert something like "01001a" to "01001A" to match Cerebro storage conventions
+  const code = card.code.replace(/[a-z]$/, (match) => match.toUpperCase());
   // Use weserv.nl as an image proxy to bypass CORS
-  return `https://images.weserv.nl/?url=${url}`;
+  return `https://images.weserv.nl/?url=https://cerebrodatastorage.blob.core.windows.net/cerebro-cards/official/${code}.jpg`;
+}
+
+export function getCardBackUrl(typeCode?: string): string {
+  let backImage = 'PlayerBack.jpg'; // Default back
+  
+  if (typeCode === 'upgrade') {
+    backImage = 'HeroBack.jpg';
+  } else if (typeCode === 'villain') {
+    backImage = 'VillainBack.jpg';
+  } else if (typeCode === 'treachery') {
+    backImage = 'EncounterBack.jpg';
+  } else if (typeCode === 'hero' || typeCode === 'alter_ego' || typeCode === 'ally' || typeCode === 'event' || typeCode === 'resource' || typeCode === 'support') {
+    // Other player cards should probably also use HeroBack
+    backImage = 'HeroBack.jpg';
+  } else if (typeCode === 'main_scheme' || typeCode === 'side_scheme' || typeCode === 'minion' || typeCode === 'attachment' || typeCode === 'environment') {
+    // Other encounter cards
+    backImage = 'EncounterBack.jpg';
+  } else {
+    // If we only stick strictly to user specified or a sensible default
+    backImage = 'HeroBack.jpg';
+  }
+
+  return `https://images.weserv.nl/?url=https://cerebrodatastorage.blob.core.windows.net/cerebro-cards/${backImage}`;
 }
 
 export async function getRandomCards(count: number): Promise<MarvelCard[]> {

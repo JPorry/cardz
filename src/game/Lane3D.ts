@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { LaneState } from '../store';
+import { LANE_TITLE_LAYOUT } from '../utils/areaLayout';
 
 export class Lane3D {
   id: string;
@@ -99,15 +100,15 @@ export class Lane3D {
     // Label mesh (flat on surface)
     this.labelMesh = this.createLabelMesh(lane.label);
     // Position the label inside the top edge of the lane
-    this.labelMesh.position.set(0, 0.005, -hd + 0.4);
+    this.labelMesh.position.set(0, 0.005, -hd + LANE_TITLE_LAYOUT.labelCenterOffset);
     this.group.add(this.labelMesh);
   }
 
   private createLabelMesh(text: string): THREE.Mesh {
     const canvas = document.createElement('canvas');
     // Using higher resolution for sharper text
-    const canvasWidth = 1024;
-    const canvasHeight = 256;
+    const canvasWidth = LANE_TITLE_LAYOUT.canvasWidth;
+    const canvasHeight = LANE_TITLE_LAYOUT.canvasHeight;
     canvas.width = canvasWidth;
     canvas.height = canvasHeight;
     const ctx = canvas.getContext('2d')!;
@@ -115,7 +116,7 @@ export class Lane3D {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Modern typography
-    const fontSize = 80; // Larger font
+    const fontSize = LANE_TITLE_LAYOUT.baseFontSize;
     ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -125,8 +126,8 @@ export class Lane3D {
     const textWidth = metrics.width;
     
     // Auto-scale font if it would overflow horizontally
-    if (textWidth > canvasWidth * 0.95) {
-      const scale = (canvasWidth * 0.95) / textWidth;
+    if (textWidth > canvasWidth * LANE_TITLE_LAYOUT.maxWidthRatio) {
+      const scale = (canvasWidth * LANE_TITLE_LAYOUT.maxWidthRatio) / textWidth;
       ctx.font = `600 ${fontSize * scale}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
     }
 
@@ -151,7 +152,7 @@ export class Lane3D {
       side: THREE.FrontSide
     });
 
-    const worldWidth = 3.0; 
+    const worldWidth = LANE_TITLE_LAYOUT.worldWidth;
     const worldHeight = worldWidth * (canvasHeight / canvasWidth);
     const geometry = new THREE.PlaneGeometry(worldWidth, worldHeight);
     geometry.rotateX(-Math.PI / 2); // Lay flat

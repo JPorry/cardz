@@ -4,9 +4,18 @@ import { Card3D } from './Card3D';
 import { Table3D } from './Table3D';
 import { Lane3D } from './Lane3D';
 import { Region3D } from './Region3D';
+import { getCardBackUrl } from '../services/marvelCdb';
+import { getCardCenterOffsetBelowTitle, getTitleWorldHeight, REGION_TITLE_LAYOUT } from '../utils/areaLayout';
+import { BOARD_CONFIG } from '../config/board';
 
 const DRAG_PLANE_Y = 0.5;
 const TABLE_CARD_SCALE = 1.35;
+
+type DraggedCardOrigin = {
+  cardId: string;
+  card: Pick<CardState, 'location' | 'position' | 'rotation' | 'faceUp' | 'laneId' | 'regionId'>;
+  sourceDeck?: Pick<DeckState, 'id' | 'position' | 'rotation' | 'cardIds' | 'laneId' | 'regionId'>;
+};
 
 
 export class SceneManager {
@@ -41,13 +50,14 @@ export class SceneManager {
   longClickTimeout: number | null = null;
   singleClickTimeout: number | null = null;
   isRadialDragMode: boolean = false;
+  draggedCardOrigin: DraggedCardOrigin | null = null;
 
   animationFrameId: number | null = null;
   clock: THREE.Clock = new THREE.Clock();
 
   // Zoom controls
-  baseCameraPos: THREE.Vector3 = new THREE.Vector3(0, 22, 10);
-  targetCameraPos: THREE.Vector3 = new THREE.Vector3(0, 22, 10);
+  baseCameraPos: THREE.Vector3 = new THREE.Vector3(0, 26, 8);
+  targetCameraPos: THREE.Vector3 = new THREE.Vector3(0, 26, 8);
   currentZoom: number = 1.0;
   minZoom: number = 0.4;
   maxZoom: number = 1.5;
@@ -57,7 +67,7 @@ export class SceneManager {
     
     // Setup Camera (matches old Canvas setup)
     this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-    this.camera.position.set(0, 22, 10); // Higher up and closer on Z for a steeper top-down angle
+    this.camera.position.set(0, 26, 8); // Higher up and less Z for a steeper top-down angle
     this.camera.lookAt(0, 0, 0);
 
     // Setup Renderer
@@ -375,6 +385,7 @@ export class SceneManager {
         if (cardModel?.location === 'deck') {
            const deck = store.decks.find(d => d.cardIds.includes(cardId));
            if (deck) {
+             this.rememberDraggedCardOrigin(cardModel, deck);
              this.activeDragDeckId = deck.id;
              this.activeDragCardId = deck.cardIds[deck.cardIds.length - 1]; // top card by default
              this.isFullDeckDrag = false;
@@ -412,6 +423,9 @@ export class SceneManager {
              }, 400);
            }
         } else {
+           if (cardModel) {
+             this.rememberDraggedCardOrigin(cardModel);
+           }
            this.activeDragCardId = cardId;
            this.activeDragDeckId = null;
            this.isFullDeckDrag = false;
@@ -454,7 +468,7 @@ export class SceneManager {
     }
 
     // Radial drag resolution
-    if (this.isRadialDragMode) {
+	    if (this.isRadialDragMode) {
       this.isRadialDragMode = false;
       const hovered = store.radialMenu.hoveredSlice;
       const itemId = store.radialMenu.itemId;
@@ -477,16 +491,18 @@ export class SceneManager {
             else if (hovered === 's') store.flipDeck(itemId);
          }
       }
-      store.closeRadialMenu();
-      return; 
-    }
+	      store.closeRadialMenu();
+        this.draggedCardOrigin = null;
+	      return; 
+	    }
 
-    if (!this.activeDragCardId && !this.activeDragDeckId) {
-      if (dist < 5) {
-        store.setFocusedCard(null);
-      }
-      return;
-    }
+	    if (!this.activeDragCardId && !this.activeDragDeckId) {
+	      if (dist < 5) {
+	        store.setFocusedCard(null);
+	      }
+        this.draggedCardOrigin = null;
+	      return;
+	    }
     const isDoubleClick = (now - this.lastClickTime < 300) && (this.lastClickCardId === this.activeDragCardId);
 
     // Tap logic
@@ -537,12 +553,13 @@ export class SceneManager {
        this.activeDragDeckId = null;
        this.hoveredTargetId = null;
        this.hoveredTargetType = null;
-       this.isFullDeckDrag = false;
-       store.setDragging(false, null);
-       store.setLanePreview(null, null, null); // Added this line
-       this.clearRegionHover();
-       return;
-    }
+	       this.isFullDeckDrag = false;
+	       store.setDragging(false, null);
+	       store.setLanePreview(null, null, null); // Added this line
+	       this.clearRegionHover();
+         this.draggedCardOrigin = null;
+	       return;
+	    }
 
     this.lastClickTime = 0;
 
@@ -583,7 +600,17 @@ export class SceneManager {
           if (regionData) {
              store.removeFromLane(this.activeDragDeckId);
              store.removeFromRegion(this.activeDragDeckId);
-             store.moveDeck(this.activeDragDeckId, [regionData.position[0], 0, regionData.position[2]], undefined, undefined, region.id);
+             const labelWorldHeight = getTitleWorldHeight(
+               REGION_TITLE_LAYOUT.worldWidth,
+               REGION_TITLE_LAYOUT.canvasWidth,
+               REGION_TITLE_LAYOUT.canvasHeight,
+             );
+             const cardCenterOffset = getCardCenterOffsetBelowTitle(
+               regionData.depth,
+               REGION_TITLE_LAYOUT.labelCenterOffset,
+               labelWorldHeight,
+             );
+             store.moveDeck(this.activeDragDeckId, [regionData.position[0], 0, regionData.position[2] + cardCenterOffset], undefined, undefined, region.id);
           }
        } else {
           // Dropping on table outside lane
@@ -597,14 +624,11 @@ export class SceneManager {
              if (c3D) { c3D.setGhostOpacity(0); }
           });
        }
-    } else if (this.activeDragCardId) {
-       const dropInHand = this.pointer.y < -0.5;
-       const dropTarget = this.findDropTarget(this.lastDragPos.x, this.lastDragPos.z, [this.activeDragCardId]);
+	    } else if (this.activeDragCardId) {
+	       const dropInHand = this.pointer.y < -0.5;
+	       const dropTarget = this.findDropTarget(this.lastDragPos.x, this.lastDragPos.z, [this.activeDragCardId]);
 
-       const cardModel = store.cards.find(c => c.id === this.activeDragCardId);
-       const fromHand = cardModel?.location === 'hand';
-
-       if (!dropInHand) {
+	       if (!dropInHand) {
           const lane = this.findLaneAtPosition(this.lastDragPos.x, this.lastDragPos.z);
           const region = this.findRegionAtPosition(this.lastDragPos.x, this.lastDragPos.z);
           
@@ -616,32 +640,42 @@ export class SceneManager {
                const countWithout = laneData.itemOrder.filter(id => id !== this.activeDragCardId).length;
                const insertIdx = computeLaneInsertIndex(laneData, this.lastDragPos.x, countWithout);
                store.insertIntoLane(lane.id, this.activeDragCardId, insertIdx);
-               const slotPos = store.getLaneSlotPosition(lane.id, insertIdx);
-               if (slotPos) {
-                 store.moveCard(this.activeDragCardId, 'table', slotPos, [0, 0, 0], lane.id);
-               } else {
-                 store.moveCard(this.activeDragCardId, 'table', [this.lastDragPos.x, 0, this.lastDragPos.z], [0, 0, 0]);
-               }
-             }
-          } else if (dropTarget?.type === 'card') {
-             store.createDeck(this.activeDragCardId, dropTarget.id);
-          } else if (dropTarget?.type === 'deck') {
-             store.addCardToDeck(this.activeDragCardId, dropTarget.id);
-          } else if (region) {
+	               const slotPos = store.getLaneSlotPosition(lane.id, insertIdx);
+	               if (slotPos) {
+	                 store.moveCard(this.activeDragCardId, 'table', slotPos, [0, 0, 0], lane.id);
+	               } else {
+	                 store.moveCard(this.activeDragCardId, 'table', [this.lastDragPos.x, 0, this.lastDragPos.z], [0, 0, 0]);
+	               }
+	             }
+	          } else if (dropTarget?.type === 'card') {
+	             store.createDeck(this.activeDragCardId, dropTarget.id);
+	          } else if (dropTarget?.type === 'deck') {
+	             store.addCardToDeck(this.activeDragCardId, dropTarget.id);
+	          } else if (region) {
              const regionData = store.regions.find(r => r.id === region.id);
              if (regionData) {
                 store.removeFromLane(this.activeDragCardId);
                 store.removeFromRegion(this.activeDragCardId);
-                store.moveCard(this.activeDragCardId, 'table', [regionData.position[0], 0, regionData.position[2]], [0, 0, 0], undefined, region.id);
-             }
-          } else {
+                const labelWorldHeight = getTitleWorldHeight(
+                  REGION_TITLE_LAYOUT.worldWidth,
+                  REGION_TITLE_LAYOUT.canvasWidth,
+                  REGION_TITLE_LAYOUT.canvasHeight,
+                );
+                const cardCenterOffset = getCardCenterOffsetBelowTitle(
+                  regionData.depth,
+                  REGION_TITLE_LAYOUT.labelCenterOffset,
+                  labelWorldHeight,
+	                );
+	                store.moveCard(this.activeDragCardId, 'table', [regionData.position[0], 0, regionData.position[2] + cardCenterOffset], [0, 0, 0], undefined, region.id);
+	             }
+	          } else {
              // Dropping outside any lane — remove from lane if it was in one
-             store.removeFromLane(this.activeDragCardId);
-             store.moveCard(this.activeDragCardId, 'table', [this.lastDragPos.x, 0, this.lastDragPos.z], [0, 0, 0]);
-          }
-
-          if (fromHand && cardModel && !cardModel.faceUp) {
-             store.flipCard(this.activeDragCardId);
+             if (BOARD_CONFIG.allowDirectTableCardDrop === false) {
+               this.restoreDraggedCardOrigin();
+	             } else {
+	               store.removeFromLane(this.activeDragCardId);
+	               store.moveCard(this.activeDragCardId, 'table', [this.lastDragPos.x, 0, this.lastDragPos.z], [0, 0, 0]);
+	             }
           }
        } else {
            const c = store.cards.find(c => c.id === this.activeDragCardId);
@@ -675,12 +709,107 @@ export class SceneManager {
       }
     }
 
-    this.activeDragCardId = null;
-    this.activeDragDeckId = null;
-    this.hoveredTargetId = null;
-    this.hoveredTargetType = null;
-    this.isFullDeckDrag = false;
-    store.setDragging(false, null);
+	    this.activeDragCardId = null;
+	    this.activeDragDeckId = null;
+	    this.hoveredTargetId = null;
+	    this.hoveredTargetType = null;
+	    this.isFullDeckDrag = false;
+      this.draggedCardOrigin = null;
+	    store.setDragging(false, null);
+	  }
+
+  private rememberDraggedCardOrigin(card: CardState, sourceDeck?: DeckState) {
+    this.draggedCardOrigin = {
+      cardId: card.id,
+      card: {
+        location: card.location,
+        position: [...card.position],
+        rotation: [...card.rotation],
+        faceUp: card.faceUp,
+        laneId: card.laneId,
+        regionId: card.regionId,
+      },
+      sourceDeck: sourceDeck ? {
+        id: sourceDeck.id,
+        position: [...sourceDeck.position],
+        rotation: [...sourceDeck.rotation],
+        cardIds: [...sourceDeck.cardIds],
+        laneId: sourceDeck.laneId,
+        regionId: sourceDeck.regionId,
+      } : undefined,
+    };
+  }
+
+  private restoreDraggedCardOrigin() {
+    const origin = this.draggedCardOrigin;
+    if (!origin) return;
+
+    if (origin.card.location === 'deck' && origin.sourceDeck) {
+      const sourceDeck = origin.sourceDeck;
+      const laneReplacementId = sourceDeck.cardIds[sourceDeck.cardIds.length - 2];
+
+      useGameStore.setState((state) => {
+        const deckExists = state.decks.some((deck) => deck.id === sourceDeck.id);
+
+        return {
+          lanes: state.lanes.map((lane) => {
+            if (lane.id !== sourceDeck.laneId) return lane;
+            if (lane.itemOrder.includes(sourceDeck.id) || !laneReplacementId) return lane;
+
+            return {
+              ...lane,
+              itemOrder: lane.itemOrder.map((id) => id === laneReplacementId ? sourceDeck.id : id),
+            };
+          }),
+          decks: deckExists
+            ? state.decks.map((deck) => deck.id === sourceDeck.id ? {
+              ...deck,
+              position: [...sourceDeck.position],
+              rotation: [...sourceDeck.rotation],
+              cardIds: [...sourceDeck.cardIds],
+              laneId: sourceDeck.laneId,
+              regionId: sourceDeck.regionId,
+            } : deck)
+            : [
+              ...state.decks,
+              {
+                ...sourceDeck,
+                position: [...sourceDeck.position],
+                rotation: [...sourceDeck.rotation],
+                cardIds: [...sourceDeck.cardIds],
+              },
+            ],
+          cards: state.cards.map((card) => {
+            if (!sourceDeck.cardIds.includes(card.id)) return card;
+
+            return {
+              ...card,
+              location: 'deck',
+              position: [...sourceDeck.position],
+              rotation: [...sourceDeck.rotation],
+              laneId: undefined,
+              regionId: undefined,
+            };
+          }),
+        };
+      });
+
+      return;
+    }
+
+    useGameStore.getState().moveCard(
+      origin.cardId,
+      origin.card.location,
+      [...origin.card.position],
+      [...origin.card.rotation],
+      origin.card.laneId,
+      origin.card.regionId,
+    );
+
+    const currentCard = useGameStore.getState().cards.find((card) => card.id === origin.cardId);
+    if (currentCard && currentCard.faceUp !== origin.card.faceUp) {
+      useGameStore.getState().flipCard(origin.cardId);
+    }
   }
 
   private findDropTarget(x: number, z: number, ignoreIds: string[]): { type: 'card'|'deck', id: string } | null {
@@ -810,7 +939,7 @@ export class SceneManager {
       
       const c3d = this.cards.get(data.id);
       if (c3d) {
-        c3d.refreshArtwork(data.artworkUrl);
+        c3d.refreshArtwork(data.artworkUrl, getCardBackUrl(data.typeCode));
       }
     }
 
@@ -934,18 +1063,18 @@ export class SceneManager {
         // HUD Tracking calculation identical to old useFrame
         this.camera.updateMatrixWorld();
 
-        const spacing = 1.3;
+        const spacing = 1.625; // 1.3 * 1.25
         const startX = -(totalHandCards - 1) * spacing / 2;
         const xOffset = startX + indexInHand * spacing;
         
         const distance = 3;
-        const baseScale = 0.45;
-        const focusedScale = 0.65;
+        const baseScale = 0.36; // 0.45 / 1.25
+        const focusedScale = 0.52; // 0.65 / 1.25
         const currentScale = isFocused ? focusedScale : baseScale;
-        const liftHUD = isFocused ? 1.2 : 0;
+        const liftHUD = isFocused ? 1.5 : 0; // 1.2 * 1.25
 
         // Pushing Y further down so they tuck into the bottom border
-        const vector = new THREE.Vector3(xOffset * baseScale, (-2.8 + liftHUD) * baseScale, -distance);
+        const vector = new THREE.Vector3(xOffset * baseScale, (-3.5 + liftHUD) * baseScale, -distance); // -2.8 * 1.25 = -3.5
         vector.applyMatrix4(this.camera.matrixWorld);
         
         const worldQuat = this.camera.quaternion.clone();

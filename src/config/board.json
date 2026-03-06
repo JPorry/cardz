@@ -1,0 +1,106 @@
+{
+  "board": {
+    "width": 32.2,
+    "depth": 20.7,
+    "padding": 1,
+    "allowDirectTableCardDrop": false
+  },
+  "lanes": [
+    {
+      "id": "lane-villain-area",
+      "label": "Villain Area",
+      "x": 8.25,
+      "y": 0,
+      "width": 13.7,
+      "depth": 4,
+      "cardSpacing": 2.4,
+      "flipped": false
+    },
+    {
+      "id": "lane-enemy-area",
+      "label": "Enemy Area",
+      "x": 0,
+      "y": 4.5,
+      "width": 30.2,
+      "depth": 4,
+      "cardSpacing": 2.4,
+      "flipped": false
+    },
+    {
+      "id": "lane-engagement-area",
+      "label": "Engagement Area",
+      "x": 0,
+      "y": 9,
+      "width": 30.2,
+      "depth": 4,
+      "cardSpacing": 2.4,
+      "flipped": false
+    },
+    {
+      "id": "lane-player-area",
+      "label": "Player Area",
+      "x": 0,
+      "y": 13.5,
+      "width": 21.95,
+      "depth": 4,
+      "cardSpacing": 2.4,
+      "flipped": false
+    }
+  ],
+  "regions": [
+    {
+      "id": "region-main-scheme",
+      "label": "Main Scheme",
+      "x": 0,
+      "y": 0,
+      "width": 3.625,
+      "depth": 4,
+      "flipped": false
+    },
+    {
+      "id": "region-villain",
+      "label": "Villain",
+      "x": 4.125,
+      "y": 0,
+      "width": 3.625,
+      "depth": 4,
+      "flipped": false
+    },
+    {
+      "id": "region-villain-deck",
+      "label": "Villain Deck",
+      "x": 22.45,
+      "y": 0,
+      "width": 3.625,
+      "depth": 4,
+      "flipped": true
+    },
+    {
+      "id": "region-villain-discard",
+      "label": "Villain Discard",
+      "x": 26.575,
+      "y": 0,
+      "width": 3.625,
+      "depth": 4,
+      "flipped": false
+    },
+    {
+      "id": "region-player-deck",
+      "label": "Player Deck",
+      "x": 22.45,
+      "y": 13.5,
+      "width": 3.625,
+      "depth": 4,
+      "flipped": true
+    },
+    {
+      "id": "region-player-discard",
+      "label": "Player Discard",
+      "x": 26.575,
+      "y": 13.5,
+      "width": 3.625,
+      "depth": 4,
+      "flipped": false
+    }
+  ]
+}

@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import type { CardState } from '../store';
 
-const CARD_WIDTH = 1.0;
-const CARD_HEIGHT = 1.45;
-const CARD_THICKNESS = 0.02;
+const CARD_WIDTH = 1.44;
+const CARD_HEIGHT = 2.09;
+const CARD_THICKNESS = 0.025;
 
 export class Card3D {
   id: string;
@@ -21,7 +21,10 @@ export class Card3D {
 
   frontMesh?: THREE.Mesh;
   frontMat?: THREE.MeshStandardMaterial;
+  backMesh?: THREE.Mesh;
+  backMat?: THREE.MeshStandardMaterial;
   currentArtworkUrl?: string;
+  currentBackArtworkUrl?: string;
 
   constructor(cardData: CardState) {
     this.id = cardData.id;
@@ -48,7 +51,7 @@ export class Card3D {
       this.targetQuaternion.setFromEuler(new THREE.Euler(-Math.PI / 2, cardData.rotation[1] + flipYRot, cardData.rotation[2]));
     } else {
       this.targetPosition.set(0, -10, 0);
-      this.targetScale.set(0.375, 0.375, 0.375);
+      this.targetScale.set(0.3, 0.3, 0.3); // 0.375 / 1.25
       this.targetQuaternion.setFromEuler(new THREE.Euler(-Math.PI / 4, 0, 0));
     }
     
@@ -120,30 +123,47 @@ export class Card3D {
     this.group.add(this.frontMesh);
 
     // Back face
-    const backMat = new THREE.MeshStandardMaterial({ color: 0xb20000, transparent: false, opacity: 1 });
-    const backMesh = new THREE.Mesh(faceGeometry, backMat);
-    backMesh.position.set(0, 0, -CARD_THICKNESS / 2 - 0.005);
-    backMesh.rotation.set(0, Math.PI, 0);
-    this.group.add(backMesh);
+    this.backMat = new THREE.MeshStandardMaterial({ color: 0xb20000, transparent: false, opacity: 1 });
+    this.backMesh = new THREE.Mesh(faceGeometry, this.backMat);
+    this.backMesh.position.set(0, 0, -CARD_THICKNESS / 2 - 0.005);
+    this.backMesh.rotation.set(0, Math.PI, 0);
+    this.group.add(this.backMesh);
   }
 
-  refreshArtwork(artworkUrl?: string) {
-    if (!artworkUrl || artworkUrl === this.currentArtworkUrl) return;
-    this.currentArtworkUrl = artworkUrl;
+  refreshArtwork(artworkUrl?: string, backArtworkUrl?: string) {
+    if (artworkUrl && artworkUrl !== this.currentArtworkUrl) {
+      this.currentArtworkUrl = artworkUrl;
+      const loader = new THREE.TextureLoader();
+      loader.setCrossOrigin('anonymous');
+      loader.load(artworkUrl, (texture) => {
+        if (this.frontMat) {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.minFilter = THREE.LinearFilter;
+          texture.magFilter = THREE.LinearFilter;
+          texture.anisotropy = 4;
+          this.frontMat.map = texture;
+          this.frontMat.color.set(0xffffff); // Ensure it's white to show texture clearly
+          this.frontMat.needsUpdate = true;
+        }
+      });
+    }
 
-    const loader = new THREE.TextureLoader();
-    loader.setCrossOrigin('anonymous');
-    loader.load(artworkUrl, (texture) => {
-      if (this.frontMat) {
-        texture.colorSpace = THREE.SRGBColorSpace;
-        texture.minFilter = THREE.LinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-        texture.anisotropy = 4;
-        this.frontMat.map = texture;
-        this.frontMat.color.set(0xffffff); // Ensure it's white to show texture clearly
-        this.frontMat.needsUpdate = true;
-      }
-    });
+    if (backArtworkUrl && backArtworkUrl !== this.currentBackArtworkUrl) {
+      this.currentBackArtworkUrl = backArtworkUrl;
+      const loader = new THREE.TextureLoader();
+      loader.setCrossOrigin('anonymous');
+      loader.load(backArtworkUrl, (texture) => {
+        if (this.backMat) {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.minFilter = THREE.LinearFilter;
+          texture.magFilter = THREE.LinearFilter;
+          texture.anisotropy = 4;
+          this.backMat.map = texture;
+          this.backMat.color.set(0xffffff); // Ensure it's white to show texture clearly
+          this.backMat.needsUpdate = true;
+        }
+      });
+    }
   }
 
   private setupGhostMeshes() {

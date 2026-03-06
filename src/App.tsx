@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { SceneManager } from './game/SceneManager';
 import { RadialMenu } from './components/RadialMenu';
 import { CardPreview } from './components/CardPreview';
+import { BoardMenu } from './components/BoardMenu';
 import './index.css';
 
 function App() {
@@ -22,6 +23,7 @@ function App() {
   return (
     <div style={{ width: '100vw', height: '100vh' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }} />
+      <BoardMenu />
       <RadialMenu />
       <CardPreview />
     </div>
@@ -29,4 +31,3 @@ function App() {
 }
 
 export default App;
-
