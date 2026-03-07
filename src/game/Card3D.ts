@@ -1,8 +1,14 @@
 import * as THREE from 'three';
 import type { CardState } from '../store';
 import { CARD_HEIGHT, CARD_WIDTH, getCardTableEuler } from '../utils/cardOrientation';
+import { hasVisibleCardMetadata } from '../utils/cardMetadata';
 
 const CARD_THICKNESS = 0.025;
+const OVERLAY_TEXTURE_WIDTH = 512;
+const OVERLAY_TEXTURE_HEIGHT = 768;
+const OVERLAY_PLANE_WIDTH = CARD_WIDTH * 0.94;
+const OVERLAY_PLANE_HEIGHT = CARD_HEIGHT * 0.94;
+const OVERLAY_OFFSET = CARD_THICKNESS / 2 + 0.008;
 
 export class Card3D {
   id: string;
@@ -19,6 +25,10 @@ export class Card3D {
   ghostTargetOpacity: number = 0;
   selectionMesh: THREE.Mesh;
   selectionMaterial: THREE.MeshBasicMaterial;
+  metadataOverlayFrontTexture?: THREE.CanvasTexture;
+  metadataOverlayBackTexture?: THREE.CanvasTexture;
+  metadataOverlayFront?: THREE.Mesh;
+  metadataOverlayBack?: THREE.Mesh;
 
   frontMesh?: THREE.Mesh;
   frontMat?: THREE.MeshStandardMaterial;
@@ -48,6 +58,8 @@ export class Card3D {
     this.selectionMesh = this.createSelectionMesh()
     this.selectionMaterial = this.selectionMesh.material as THREE.MeshBasicMaterial
     this.group.add(this.selectionMesh)
+    this.setupMetadataOverlay()
+    this.updateMetadata(cardData)
     
     // Initial State Setup
     if (cardData.location === 'table') {
@@ -264,6 +276,257 @@ export class Card3D {
     selectionMesh.renderOrder = 1
     selectionMesh.visible = false
     return selectionMesh
+  }
+
+  private setupMetadataOverlay() {
+    const frontCanvas = document.createElement('canvas');
+    frontCanvas.width = OVERLAY_TEXTURE_WIDTH;
+    frontCanvas.height = OVERLAY_TEXTURE_HEIGHT;
+    const backCanvas = document.createElement('canvas');
+    backCanvas.width = OVERLAY_TEXTURE_WIDTH;
+    backCanvas.height = OVERLAY_TEXTURE_HEIGHT;
+
+    const frontTexture = new THREE.CanvasTexture(frontCanvas);
+    frontTexture.colorSpace = THREE.SRGBColorSpace;
+    frontTexture.minFilter = THREE.LinearFilter;
+    frontTexture.magFilter = THREE.LinearFilter;
+    frontTexture.anisotropy = 4;
+
+    const backTexture = new THREE.CanvasTexture(backCanvas);
+    backTexture.colorSpace = THREE.SRGBColorSpace;
+    backTexture.minFilter = THREE.LinearFilter;
+    backTexture.magFilter = THREE.LinearFilter;
+    backTexture.anisotropy = 4;
+
+    const geometry = new THREE.PlaneGeometry(OVERLAY_PLANE_WIDTH, OVERLAY_PLANE_HEIGHT);
+    const frontMaterial = new THREE.MeshBasicMaterial({
+      map: frontTexture,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const backMaterial = new THREE.MeshBasicMaterial({
+      map: backTexture,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
+    this.metadataOverlayFrontTexture = frontTexture;
+    this.metadataOverlayBackTexture = backTexture;
+    this.metadataOverlayFront = new THREE.Mesh(geometry, frontMaterial);
+    this.metadataOverlayFront.position.set(0, 0, OVERLAY_OFFSET);
+    this.metadataOverlayFront.userData.renderOrderOffset = 2;
+
+    this.metadataOverlayBack = new THREE.Mesh(geometry, backMaterial);
+    this.metadataOverlayBack.position.set(0, 0, -OVERLAY_OFFSET);
+    this.metadataOverlayBack.rotation.set(0, Math.PI, 0);
+    this.metadataOverlayBack.userData.renderOrderOffset = 2;
+
+    this.group.add(this.metadataOverlayFront);
+    this.group.add(this.metadataOverlayBack);
+  }
+
+  private roundRect(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    radius: number,
+  ) {
+    const appliedRadius = Math.min(radius, width / 2, height / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + appliedRadius, y);
+    ctx.lineTo(x + width - appliedRadius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + appliedRadius);
+    ctx.lineTo(x + width, y + height - appliedRadius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - appliedRadius, y + height);
+    ctx.lineTo(x + appliedRadius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - appliedRadius);
+    ctx.lineTo(x, y + appliedRadius);
+    ctx.quadraticCurveTo(x, y, x + appliedRadius, y);
+    ctx.closePath();
+  }
+
+  private drawBadge(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    label: string,
+    value: number,
+    color: string,
+  ) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.32)';
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetY = 4;
+    this.roundRect(ctx, x, y, width, height, 22);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(12, 16, 24, 0.72)';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '700 22px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + width / 2, y + 34);
+
+    ctx.font = '800 58px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(value), x + width / 2, y + 72);
+    ctx.textAlign = 'left';
+  }
+
+  private drawStatusChip(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    label: string,
+    color: string,
+  ) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.28)';
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetY = 3;
+    this.roundRect(ctx, x, y, width, height, 18);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(10, 14, 20, 0.68)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 1.25;
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '700 26px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + width / 2, y + height / 2 + 2);
+    ctx.textAlign = 'left';
+  }
+
+  private drawMetadataOverlay(
+    texture: THREE.CanvasTexture,
+    cardData: CardState,
+    face: 'front' | 'back',
+  ) {
+    const canvas = texture.image as HTMLCanvasElement;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const drawWidth = cardData.tapped ? canvas.height : canvas.width;
+    const drawHeight = cardData.tapped ? canvas.width : canvas.height;
+
+    if (cardData.tapped) {
+      ctx.save();
+      const overlayRotation = face === 'front' ? Math.PI / 2 : -Math.PI / 2;
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(overlayRotation);
+      ctx.translate(-drawWidth / 2, -drawHeight / 2);
+    }
+
+    const badges = [
+      { key: 'damage', label: 'DMG', color: '#c62828' },
+      { key: 'acceleration', label: 'ACC', color: '#ef6c00' },
+      { key: 'threat', label: 'THR', color: '#1565c0' },
+      { key: 'allPurpose', label: 'ALL', color: '#2e7d32' },
+    ] as const;
+    const activeBadges = badges.filter(({ key }) => cardData.counters[key] > 0);
+    const badgeWidth = 112;
+    const badgeHeight = 112;
+    const badgeGap = 10;
+    const totalBadgeHeight = activeBadges.length > 0
+      ? activeBadges.length * badgeHeight + (activeBadges.length - 1) * badgeGap
+      : 0;
+    const badgeStartY = (drawHeight - totalBadgeHeight) / 2;
+
+    activeBadges.forEach((badge, index) => {
+      this.drawBadge(
+        ctx,
+        drawWidth - badgeWidth - 10,
+        badgeStartY + index * (badgeHeight + badgeGap),
+        badgeWidth,
+        badgeHeight,
+        badge.label,
+        cardData.counters[badge.key],
+        badge.color,
+      );
+    });
+
+    const statuses = [
+      { key: 'stunned', label: 'STUN', color: '#ad1457' },
+      { key: 'confused', label: 'CONF', color: '#4527a0' },
+      { key: 'tough', label: 'TOUGH', color: '#1b5e20' },
+    ] as const;
+    const activeStatuses = statuses.filter(({ key }) => cardData.statuses[key]);
+    const chipGap = 12;
+    const chipHeight = 56;
+    const chipWidth = activeStatuses.length === 1 ? 180 : activeStatuses.length === 2 ? 150 : 132;
+    const totalWidth = activeStatuses.length * chipWidth + Math.max(0, activeStatuses.length - 1) * chipGap;
+    const startX = (drawWidth - totalWidth) / 2;
+    const chipY = drawHeight - chipHeight;
+
+    activeStatuses.forEach((status, index) => {
+      this.drawStatusChip(
+        ctx,
+        startX + index * (chipWidth + chipGap),
+        chipY,
+        chipWidth,
+        chipHeight,
+        status.label,
+        status.color,
+      );
+    });
+
+    if (cardData.tapped) {
+      ctx.restore();
+    }
+    texture.needsUpdate = true;
+  }
+
+  updateMetadata(cardData: CardState, options?: { showOnTopOfDeck?: boolean }) {
+    if (
+      !this.metadataOverlayFrontTexture
+      || !this.metadataOverlayBackTexture
+      || !this.metadataOverlayFront
+      || !this.metadataOverlayBack
+    ) {
+      return;
+    }
+
+    const shouldShow = Boolean(
+      (cardData.location === 'table' || options?.showOnTopOfDeck)
+      && hasVisibleCardMetadata(cardData.counters, cardData.statuses)
+    );
+    this.metadataOverlayFront.visible = shouldShow && cardData.faceUp;
+    this.metadataOverlayBack.visible = shouldShow && !cardData.faceUp;
+
+    if (!shouldShow) {
+      return;
+    }
+
+    this.drawMetadataOverlay(this.metadataOverlayFrontTexture, cardData, 'front');
+    this.drawMetadataOverlay(this.metadataOverlayBackTexture, cardData, 'back');
   }
 
   setSelected(selected: boolean, stackSelected = false) {

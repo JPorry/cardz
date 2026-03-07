@@ -1,8 +1,9 @@
 import { INITIAL_LANES, INITIAL_REGIONS } from './utils/boardUtils'
 import type { CardLocation, CardState, DeckState, GameState, LaneState, RegionState } from './store'
 import type { TitlePosition } from './utils/areaLayout'
+import { normalizeCardCounters, normalizeCardStatuses } from './utils/cardMetadata'
 
-export const GAME_SESSION_VERSION = 1
+export const GAME_SESSION_VERSION = 2
 export const GAME_SESSION_STORAGE_KEY = `marvel-champions-session-v${GAME_SESSION_VERSION}`
 
 export interface SerializedGameSessionState {
@@ -13,7 +14,7 @@ export interface SerializedGameSessionState {
 }
 
 export interface SerializedGameSession {
-  version: typeof GAME_SESSION_VERSION
+  version: number
   savedAt: string
   state: SerializedGameSessionState
 }
@@ -165,6 +166,8 @@ function parseCardState(value: unknown): CardState {
     tapped: parseOptionalBoolean(value.tapped),
     attachmentGroupId: parseOptionalString(value.attachmentGroupId),
     attachmentIndex: parseOptionalNumber(value.attachmentIndex),
+    counters: normalizeCardCounters(isObject(value.counters) ? value.counters : undefined),
+    statuses: normalizeCardStatuses(isObject(value.statuses) ? value.statuses : undefined),
   }
 }
 
@@ -242,6 +245,8 @@ function cloneCard(card: CardState): CardState {
     ...card,
     position: [...card.position],
     rotation: [...card.rotation],
+    counters: { ...card.counters },
+    statuses: { ...card.statuses },
   }
 }
 
@@ -344,7 +349,7 @@ export function parseSerializedGameSession(value: unknown): SerializedGameSessio
     throw new Error('Invalid session payload.')
   }
 
-  if (value.version !== GAME_SESSION_VERSION) {
+  if (value.version !== 1 && value.version !== GAME_SESSION_VERSION) {
     throw new Error(`Unsupported session version: ${String(value.version)}`)
   }
 

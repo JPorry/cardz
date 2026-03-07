@@ -6,6 +6,7 @@ import { BoardMenu } from './components/BoardMenu'
 import { NewGameModal } from './components/NewGameModal'
 import { BoardShortcuts } from './components/BoardShortcuts'
 import { ExamineStackModal } from './components/ExamineStackModal'
+import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal'
 import { useGameStore } from './store'
 import { parseGameSessionFileContent, persistImportedGameSession, startGameSessionAutosave, bootstrapStoredGameSession } from './sessionPersistence'
 import './index.css'
@@ -17,6 +18,7 @@ function createSessionFileName() {
 function App() {
   const containerRef = useRef<HTMLDivElement>(null)
   const [isNewGameOpen, setIsNewGameOpen] = useState(false)
+  const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false)
   const isExaminingStack = useGameStore((state) => state.examinedStack !== null)
 
   useEffect(() => {
@@ -66,12 +68,14 @@ function App() {
         onStartNewGame={() => setIsNewGameOpen(true)}
         onExportState={handleExportState}
         onLoadState={handleLoadState}
+        onOpenKeyboardShortcuts={() => setIsKeyboardShortcutsOpen(true)}
       />
-      <BoardShortcuts disabled={isNewGameOpen || isExaminingStack} />
+      <BoardShortcuts disabled={isNewGameOpen || isExaminingStack || isKeyboardShortcutsOpen} />
       <SelectionOverlay />
       <CardPreview />
       <NewGameModal isOpen={isNewGameOpen} onClose={() => setIsNewGameOpen(false)} />
       <ExamineStackModal />
+      <KeyboardShortcutsModal isOpen={isKeyboardShortcutsOpen} onClose={() => setIsKeyboardShortcutsOpen(false)} />
     </div>
   )
 }

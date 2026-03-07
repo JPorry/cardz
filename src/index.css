@@ -354,6 +354,154 @@ button {
   opacity: 0.65;
 }
 
+.keyboard-shortcuts-backdrop {
+  z-index: 1850;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(211, 71, 47, 0.2), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(77, 122, 188, 0.18), transparent 34%),
+    rgba(8, 10, 16, 0.76);
+}
+
+.keyboard-shortcuts-modal {
+  width: min(920px, 100%);
+  max-height: min(760px, 100%);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid rgba(255, 248, 236, 0.12);
+  border-radius: 28px;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(30, 36, 48, 0.98), rgba(12, 15, 23, 0.98));
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+  color: #fff8ec;
+}
+
+.keyboard-shortcuts-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.keyboard-shortcuts-modal__eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 236, 209, 0.62);
+}
+
+.keyboard-shortcuts-modal__title {
+  margin: 0;
+  font-size: 1.45rem;
+}
+
+.keyboard-shortcuts-modal__close {
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff8ec;
+  cursor: pointer;
+  font-size: 1.5rem;
+}
+
+.keyboard-shortcuts-modal__close:focus-visible {
+  outline: 2px solid rgba(255, 233, 188, 0.95);
+  outline-offset: 2px;
+}
+
+.keyboard-shortcuts-modal__body {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  gap: 18px;
+  padding: 22px 24px 26px;
+}
+
+.keyboard-shortcuts-modal__intro {
+  margin: 0;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 230, 196, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.05);
+  line-height: 1.5;
+  color: rgba(255, 242, 224, 0.82);
+}
+
+.keyboard-shortcuts__section {
+  display: grid;
+  gap: 14px;
+}
+
+.keyboard-shortcuts__section-header {
+  display: grid;
+  gap: 4px;
+}
+
+.keyboard-shortcuts__section-eyebrow {
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 236, 209, 0.58);
+}
+
+.keyboard-shortcuts__section-title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.keyboard-shortcuts__list {
+  display: grid;
+  gap: 12px;
+}
+
+.keyboard-shortcuts__item {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 232, 209, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.keyboard-shortcuts__key {
+  min-width: 54px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 233, 188, 0.2);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 248, 236, 0.12), rgba(255, 248, 236, 0.04));
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.16);
+  color: #fff8ec;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.keyboard-shortcuts__copy {
+  display: grid;
+  gap: 6px;
+}
+
+.keyboard-shortcuts__copy strong {
+  font-size: 1rem;
+}
+
+.keyboard-shortcuts__copy span {
+  line-height: 1.45;
+  color: rgba(255, 239, 222, 0.72);
+}
+
 .examine-stack-backdrop {
   z-index: 1900;
   padding: 20px;
@@ -607,6 +755,31 @@ button {
   .new-game-modal__footer {
     padding-left: 18px;
     padding-right: 18px;
+  }
+
+  .keyboard-shortcuts-backdrop {
+    padding: 16px;
+  }
+
+  .keyboard-shortcuts-modal {
+    max-height: 100%;
+    border-radius: 22px;
+  }
+
+  .keyboard-shortcuts-modal__header,
+  .keyboard-shortcuts-modal__body {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .keyboard-shortcuts__item {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .keyboard-shortcuts__key {
+    min-width: 48px;
+    width: fit-content;
   }
 
   .examine-stack-backdrop {

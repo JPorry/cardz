@@ -12,9 +12,10 @@ interface BoardMenuProps {
   onStartNewGame: () => void
   onExportState: () => void
   onLoadState: (file: File) => void | Promise<void>
+  onOpenKeyboardShortcuts: () => void
 }
 
-export function BoardMenu({ onStartNewGame, onExportState, onLoadState }: BoardMenuProps) {
+export function BoardMenu({ onStartNewGame, onExportState, onLoadState, onOpenKeyboardShortcuts }: BoardMenuProps) {
   const [isOpen, setIsOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -58,6 +59,11 @@ export function BoardMenu({ onStartNewGame, onExportState, onLoadState }: BoardM
 
     if (optionId === 'load-state') {
       fileInputRef.current?.click()
+      return
+    }
+
+    if (optionId === 'help') {
+      onOpenKeyboardShortcuts()
     }
   }
 

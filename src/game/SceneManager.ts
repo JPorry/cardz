@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { useGameStore, computeAttachedCardPosition, computeLaneInsertIndex, computeLaneSlotPosition, computeRegionCardPosition, type CardState, type DeckState, type GameState, type SelectionItem } from '../store';
+import { useGameStore, computeAttachedCardPosition, computeLaneInsertIndex, computeLaneSlotPosition, computeRegionCardPosition, type CardState, type DeckState, type GameState, type HoverCardZone, type SelectionItem } from '../store';
 import { Card3D } from './Card3D';
 import { Table3D } from './Table3D';
 import { Lane3D } from './Lane3D';
@@ -277,6 +277,43 @@ export class SceneManager {
     return topCard?.faceUp ? topCardId : null
   }
 
+  private getHoveredShortcutCard(cardId: string): CardState | null {
+    const store = useGameStore.getState()
+    const card = store.cards.find((entry) => entry.id === cardId)
+    if (
+      !card
+      || (!card.faceUp && (!card.backArtworkUrl || card.backArtworkUrl === getCardBackUrl(card.typeCode)))
+    ) {
+      return null
+    }
+
+    if (card.location === 'table') {
+      return card
+    }
+
+    if (card.location !== 'deck') {
+      return null
+    }
+
+    const deck = store.decks.find((entry) => entry.cardIds.includes(card.id))
+    if (!deck) return null
+
+    const topCardId = deck.cardIds[deck.cardIds.length - 1]
+    return topCardId === card.id ? card : null
+  }
+
+  private getHoverZoneFromIntersection(card: CardState, intersection: THREE.Intersection<THREE.Object3D>): HoverCardZone {
+    const card3D = this.cards.get(card.id)
+    if (!card3D) {
+      return 'top'
+    }
+
+    const originWorld = card3D.group.localToWorld(new THREE.Vector3(0, 0, 0))
+    const originScreen = originWorld.project(this.camera)
+    const hitScreen = intersection.point.clone().project(this.camera)
+    return hitScreen.y >= originScreen.y ? 'top' : 'bottom'
+  }
+
   private onPointerMove = (e: PointerEvent) => {
     this.pointer.copy(this.getPointerCoords(e));
     const store = useGameStore.getState();
@@ -430,11 +467,22 @@ export class SceneManager {
         }
         
         const cardId = obj?.userData?.cardId;
-        if (cardId && store.hoveredCardId !== cardId) {
-          store.setHoveredCard(cardId, e.clientX);
+        if (cardId) {
+          const card = store.cards.find(c => c.id === cardId);
+          const eligibleShortcutCard = this.getHoveredShortcutCard(cardId)
+          const hoverZone = eligibleShortcutCard
+            ? this.getHoverZoneFromIntersection(eligibleShortcutCard, intersects[0])
+            : null
+
+          if (
+            store.hoveredCardId !== cardId
+            || store.hoveredCardScreenX !== e.clientX
+            || store.hoveredCardZone !== hoverZone
+          ) {
+            store.setHoveredCard(cardId, e.clientX, hoverZone);
+          }
           
           // Focus hand cards on hover for desktop
-          const card = store.cards.find(c => c.id === cardId);
           if (card?.location === 'hand') {
             store.setFocusedCard(cardId);
           } else {
@@ -1844,6 +1892,19 @@ export class SceneManager {
       const c3d = this.cards.get(data.id);
       if (c3d) {
         c3d.refreshArtwork(data.artworkUrl, data.backArtworkUrl ?? getCardBackUrl(data.typeCode));
+        const deck = state.decks.find((entry) => entry.cardIds.includes(data.id))
+        const showOnTopOfDeck = Boolean(
+          deck
+          && deck.cardIds[deck.cardIds.length - 1] === data.id
+          && (
+            data.faceUp
+            || (
+              Boolean(data.backArtworkUrl)
+              && data.backArtworkUrl !== getCardBackUrl(data.typeCode)
+            )
+          ),
+        )
+        c3d.updateMetadata(data, { showOnTopOfDeck });
       }
     }
 

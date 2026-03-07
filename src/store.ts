@@ -17,6 +17,14 @@ import {
   exportSerializedGameSession,
   type SerializedGameSession,
 } from './session'
+import {
+  clampCounterValue,
+  createDefaultCardMetadata,
+  type CardCounterKey,
+  type CardCounters,
+  type CardStatusKey,
+  type CardStatuses,
+} from './utils/cardMetadata'
 
 export type CardLocation = 'deck' | 'hand' | 'table' | 'discard'
 export type SelectionKind = 'card' | 'deck'
@@ -41,6 +49,8 @@ export interface MarqueeSelectionState {
   currentY: number
   additive: boolean
 }
+
+export type HoverCardZone = 'top' | 'bottom'
 
 export interface StackTargetContext {
   position: [number, number, number]
@@ -71,6 +81,8 @@ export interface CardState {
   tapped?: boolean
   attachmentGroupId?: string
   attachmentIndex?: number
+  counters: CardCounters
+  statuses: CardStatuses
 }
 
 export interface GameSetupLayout {
@@ -143,12 +155,17 @@ export interface GameState {
   activeDragType: 'card' | 'deck' | null
   hoveredCardId: string | null
   hoveredCardScreenX: number | null
+  hoveredCardZone: HoverCardZone | null
   previewCardId: string | null
   focusedCardId: string | null
   setDragging: (dragging: boolean, type?: 'card' | 'deck' | null, id?: string | null) => void
-  setHoveredCard: (id: string | null, x?: number | null) => void
+  setHoveredCard: (id: string | null, x?: number | null, zone?: HoverCardZone | null) => void
   setPreviewCard: (id: string | null) => void
   setFocusedCard: (id: string | null) => void
+  setCardCounter: (id: string, counter: CardCounterKey, value: number) => void
+  adjustCardCounter: (id: string, counter: CardCounterKey, delta: number) => void
+  toggleCardStatus: (id: string, status: CardStatusKey) => void
+  setCardStatus: (id: string, status: CardStatusKey, active: boolean) => void
   setSelectedItems: (items: SelectionItem[]) => void
   setDraggedSelectionItems: (items: SelectionItem[]) => void
   setDragTargetContext: (context: StackTargetContext | null) => void
@@ -496,6 +513,22 @@ function shuffleArray<T>(items: T[]): T[] {
   return nextItems
 }
 
+function withCardMetadata(card: Omit<CardState, 'counters' | 'statuses'> & Partial<Pick<CardState, 'counters' | 'statuses'>>): CardState {
+  const defaults = createDefaultCardMetadata()
+  return {
+    ...card,
+    ...defaults,
+    counters: {
+      ...defaults.counters,
+      ...card.counters,
+    },
+    statuses: {
+      ...defaults.statuses,
+      ...card.statuses,
+    },
+  }
+}
+
 function prepareCardsForRegion(
   cards: CardState[],
   region: RegionState,
@@ -731,6 +764,7 @@ function createTransientUiResetState() {
     handPreviewItemId: null,
     hoveredCardId: null,
     hoveredCardScreenX: null,
+    hoveredCardZone: null,
     previewCardId: null,
     focusedCardId: null,
     examinedStack: null,
@@ -778,6 +812,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
   hoveredCardId: null,
   hoveredCardScreenX: null,
+  hoveredCardZone: null,
   previewCardId: null,
   focusedCardId: null,
   setDragging: (dragging, type = null) => 
@@ -786,11 +821,68 @@ export const useGameStore = create<GameState>((set, get) => ({
       activeDragType: dragging ? type : null,
       // Clear hover when dragging starts
       hoveredCardId: dragging ? null : state.hoveredCardId,
-      hoveredCardScreenX: dragging ? null : state.hoveredCardScreenX
+      hoveredCardScreenX: dragging ? null : state.hoveredCardScreenX,
+      hoveredCardZone: dragging ? null : state.hoveredCardZone,
     })),
-  setHoveredCard: (id, x) => set({ hoveredCardId: id, hoveredCardScreenX: x ?? null }),
+  setHoveredCard: (id, x, zone) => set({
+    hoveredCardId: id,
+    hoveredCardScreenX: x ?? null,
+    hoveredCardZone: id ? zone ?? null : null,
+  }),
   setPreviewCard: (id) => set({ previewCardId: id }),
   setFocusedCard: (id) => set({ focusedCardId: id }),
+  setCardCounter: (id, counter, value) => set((state) => ({
+    cards: state.cards.map((card) => (
+      card.id === id
+        ? {
+            ...card,
+            counters: {
+              ...card.counters,
+              [counter]: clampCounterValue(value),
+            },
+          }
+        : card
+    )),
+  })),
+  adjustCardCounter: (id, counter, delta) => set((state) => ({
+    cards: state.cards.map((card) => (
+      card.id === id
+        ? {
+            ...card,
+            counters: {
+              ...card.counters,
+              [counter]: clampCounterValue(card.counters[counter] + delta),
+            },
+          }
+        : card
+    )),
+  })),
+  toggleCardStatus: (id, status) => set((state) => ({
+    cards: state.cards.map((card) => (
+      card.id === id
+        ? {
+            ...card,
+            statuses: {
+              ...card.statuses,
+              [status]: !card.statuses[status],
+            },
+          }
+        : card
+    )),
+  })),
+  setCardStatus: (id, status, active) => set((state) => ({
+    cards: state.cards.map((card) => (
+      card.id === id
+        ? {
+            ...card,
+            statuses: {
+              ...card.statuses,
+              [status]: active,
+            },
+          }
+        : card
+    )),
+  })),
   setSelectedItems: (items) => set({ selectedItems: upsertSelectionItems(items) }),
   setDraggedSelectionItems: (items) => set({ draggedSelectionItems: upsertSelectionItems(items) }),
   setDragTargetContext: (context) => set({ dragTargetContext: context ? { ...context } : null }),
@@ -883,16 +975,18 @@ export const useGameStore = create<GameState>((set, get) => ({
     })),
   flipDeck: (deckId) =>
     set((state) => {
-      const deck = state.decks.find((d) => d.id === deckId);
-      if (!deck) return state;
+      const deck = state.decks.find((d) => d.id === deckId)
+      if (!deck || deck.cardIds.length === 0) return state
 
-      // Reverse the card order in the deck
-      const reversedIds = [...deck.cardIds].reverse();
+      const topCardId = deck.cardIds[deck.cardIds.length - 1]
 
       return {
-        decks: state.decks.map((d) => (d.id === deckId ? { ...d, cardIds: reversedIds } : d)),
-        cards: state.cards.map((c) => (deck.cardIds.includes(c.id) ? { ...c, faceUp: !c.faceUp } : c)),
-      };
+        cards: state.cards.map((card) => (
+          card.id === topCardId
+            ? { ...card, faceUp: !card.faceUp }
+            : card
+        )),
+      }
     }),
   flipStack: (deckId) => {
     get().flipDeck(deckId)
@@ -1835,7 +1929,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           ...preparedVillainStackCards,
           ...preparedMainSchemeCards,
           ...preparedNemesisCards,
-        ],
+        ].map((card) => withCardMetadata(card)),
         decks: nextDecks,
         lanes: freshLanes.map((lane) => ({
           ...lane,
