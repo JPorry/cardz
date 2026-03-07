@@ -1,8 +1,11 @@
 import * as THREE from 'three'
 import type { CardState } from '../store'
 
-const CARD_WIDTH = 1.44
-const CARD_HEIGHT = 2.09
+export const CARD_WIDTH = 1.44
+export const CARD_HEIGHT = 2.09
+export const TABLE_CARD_SCALE = 1.65
+export const TABLE_CARD_WIDTH = CARD_WIDTH * TABLE_CARD_SCALE
+export const TABLE_CARD_HEIGHT = CARD_HEIGHT * TABLE_CARD_SCALE
 
 export function getEffectiveCardDimensions(
   card: Pick<CardState, 'tapped'>,

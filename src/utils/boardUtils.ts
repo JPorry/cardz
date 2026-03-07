@@ -1,6 +1,30 @@
 import BOARD_DATA from '../config/board.json';
+import type { TitlePosition } from '../utils/areaLayout';
 
 const { width, depth, padding } = BOARD_DATA.board;
+
+type RawLaneConfig = {
+  id: string
+  label: string
+  titlePosition?: TitlePosition
+  x: number
+  y: number
+  width: number
+  depth: number
+  cardSpacing: number
+  flipped?: boolean
+}
+
+type RawRegionConfig = {
+  id: string
+  label: string
+  titlePosition?: TitlePosition
+  x: number
+  y: number
+  width: number
+  depth: number
+  flipped?: boolean
+}
 
 /**
  * Converts a board-relative center coordinate into THREE.js world coordinates.
@@ -21,9 +45,10 @@ export function toWorldPos(boardX: number, boardZ: number): [number, number, num
 // Ensure the json config matches the interfaces expected by the store.
 // In board.json, x and y are the Top-Left corner of each element to make layout easier.
 // We convert them to Center coordinates here for THREE.js.
-export const INITIAL_LANES = BOARD_DATA.lanes.map(lane => ({
+export const INITIAL_LANES = (BOARD_DATA.lanes as RawLaneConfig[]).map((lane) => ({
   id: lane.id,
   label: lane.label,
+  titlePosition: lane.titlePosition ?? 'left',
   position: toWorldPos(lane.x + lane.width / 2, lane.y + lane.depth / 2),
   width: lane.width,
   depth: lane.depth,
@@ -31,9 +56,10 @@ export const INITIAL_LANES = BOARD_DATA.lanes.map(lane => ({
   flipped: lane.flipped ?? false,
 }));
 
-export const INITIAL_REGIONS = BOARD_DATA.regions.map(region => ({
+export const INITIAL_REGIONS = (BOARD_DATA.regions as RawRegionConfig[]).map((region) => ({
   id: region.id,
   label: region.label,
+  titlePosition: region.titlePosition ?? 'left',
   position: toWorldPos(region.x + region.width / 2, region.y + region.depth / 2),
   width: region.width,
   depth: region.depth,

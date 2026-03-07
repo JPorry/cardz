@@ -1,16 +1,14 @@
 import * as THREE from 'three';
-import { useGameStore, computeLaneInsertIndex, computeLaneSlotPosition, type CardState, type DeckState, type GameState, type SelectionItem } from '../store';
+import { useGameStore, computeAttachedCardPosition, computeLaneInsertIndex, computeLaneSlotPosition, computeRegionCardPosition, type CardState, type DeckState, type GameState, type SelectionItem } from '../store';
 import { Card3D } from './Card3D';
 import { Table3D } from './Table3D';
 import { Lane3D } from './Lane3D';
 import { Region3D } from './Region3D';
 import { getCardBackUrl } from '../services/marvelCdb';
-import { getCardTableEuler } from '../utils/cardOrientation';
-import { getCardCenterOffsetBelowTitle, getTitleWorldHeight, REGION_TITLE_LAYOUT } from '../utils/areaLayout';
+import { getCardTableEuler, TABLE_CARD_SCALE } from '../utils/cardOrientation';
 import { BOARD_CONFIG } from '../config/board';
 
 const DRAG_PLANE_Y = 0.5;
-const TABLE_CARD_SCALE = 1.35;
 const HAND_DROP_THRESHOLD = -0.5;
 const HAND_CARD_SPACING = 1.625;
 const HAND_DISTANCE = 3;
@@ -40,6 +38,18 @@ type DragSelectionEntry = {
   item: SelectionItem;
   offset: THREE.Vector3;
 };
+
+type SelectionDropUnit =
+  | {
+      kind: 'item';
+      item: SelectionItem;
+    }
+  | {
+      kind: 'attachment-group';
+      groupId: string;
+      anchorItem: SelectionItem;
+      items: SelectionItem[];
+    };
 
 
 export class SceneManager {
@@ -73,6 +83,7 @@ export class SceneManager {
   singleClickTimeout: number | null = null;
   draggedCardOrigin: DraggedCardOrigin | null = null;
   pendingSelectionItem: SelectionItem | null = null;
+  pendingSelectionItems: SelectionItem[] = [];
   pendingCardId: string | null = null;
   isPendingMarquee: boolean = false;
   isMarqueeSelecting: boolean = false;
@@ -112,8 +123,7 @@ export class SceneManager {
     // Setup Raycaster
     this.raycaster = new THREE.Raycaster();
 
-    // Environment map (cheap fake for now, to replace Environment preset="city")
-    this.scene.background = new THREE.Color(0x333333);
+    this.scene.background = new THREE.Color(0x252a36);
     
     // Lights (adjusted to make shadows more transparent and softer)
     const ambientLight = new THREE.AmbientLight(0xffffff, Math.PI * 0.8); // Brighter ambient fills the shadow
@@ -207,21 +217,49 @@ export class SceneManager {
     return e.pointerType === 'touch' || e.pointerType === 'pen'
   }
 
-  private getSelectionItemForCard(cardId: string): SelectionItem | null {
+  private getAttachmentCards(groupId: string) {
+    return useGameStore.getState().cards
+      .filter((card) => card.attachmentGroupId === groupId && card.location === 'table')
+      .sort((left, right) => (left.attachmentIndex ?? 0) - (right.attachmentIndex ?? 0))
+  }
+
+  private getSelectionItemsForCard(cardId: string): SelectionItem[] {
     const store = useGameStore.getState()
     const card = store.cards.find((entry) => entry.id === cardId)
-    if (!card || (card.location !== 'table' && card.location !== 'deck')) return null
+    if (!card || (card.location !== 'table' && card.location !== 'deck')) return []
 
     if (card.location === 'deck') {
       const deck = store.decks.find((entry) => entry.cardIds.includes(cardId))
-      return deck ? { id: deck.id, kind: 'deck' } : null
+      return deck ? [{ id: deck.id, kind: 'deck' }] : []
     }
 
-    return { id: card.id, kind: 'card' }
+    if (card.attachmentGroupId) {
+      return this.getAttachmentCards(card.attachmentGroupId).map((entry) => ({ id: entry.id, kind: 'card' as const }))
+    }
+
+    return [{ id: card.id, kind: 'card' }]
   }
 
   private isSelectionItemSelected(item: SelectionItem) {
     return useGameStore.getState().selectedItems.some((entry) => entry.id === item.id && entry.kind === item.kind)
+  }
+
+  private areSelectionItemsSelected(items: SelectionItem[]) {
+    return items.every((item) => this.isSelectionItemSelected(item))
+  }
+
+  private toggleSelectionItems(items: SelectionItem[]) {
+    const store = useGameStore.getState()
+    const allSelected = this.areSelectionItemsSelected(items)
+    if (allSelected) {
+      store.setSelectedItems(store.selectedItems.filter((entry) => !items.some((item) => item.id === entry.id && item.kind === entry.kind)))
+      return
+    }
+
+    store.setSelectedItems([
+      ...store.selectedItems.filter((entry) => !items.some((item) => item.id === entry.id && item.kind === entry.kind)),
+      ...items,
+    ])
   }
 
   private getRevealPreviewCardId(item: SelectionItem, fallbackCardId: string | null = null) {
@@ -257,8 +295,8 @@ export class SceneManager {
     }
 
     if (this.pendingSelectionItem && dist > 5 && !this.activeDragCardId && !this.activeDragDeckId) {
-      if (this.isSelectionItemSelected(this.pendingSelectionItem)) {
-        this.beginSelectionDrag(this.pendingSelectionItem)
+      if (this.pendingSelectionItems.length > 1 || this.isSelectionItemSelected(this.pendingSelectionItem)) {
+        this.beginSelectionDrag(this.pendingSelectionItem, this.pendingSelectionItems)
       } else if (this.pendingCardId) {
         this.beginSingleDrag(this.pendingCardId)
       }
@@ -326,7 +364,7 @@ export class SceneManager {
             position: [this.lastDragPos.x, this.lastDragPos.y, this.lastDragPos.z],
             rotation: [0, 0, 0],
           })
-          this.updateLaneHover(tableHit.x, tableHit.z, this.pendingSelectionItem?.id ?? this.dragSelectionEntries[0]?.item.id)
+          this.updateLaneHover(tableHit.x, tableHit.z, this.getGroupDragPreviewItemId())
           this.updateRegionHover(tableHit.x, tableHit.z)
           this.hoveredTargetId = null
           this.hoveredTargetType = null
@@ -442,7 +480,8 @@ export class SceneManager {
       if (cardId) {
         const store = useGameStore.getState();
         const cardModel = store.cards.find(c => c.id === cardId);
-        const selectionItem = this.getSelectionItemForCard(cardId)
+        const selectionItems = this.getSelectionItemsForCard(cardId)
+        const selectionItem = selectionItems[0] ?? null
         
         this.dragStartClientPos.set(e.clientX, e.clientY);
         const tableHit = new THREE.Vector3();
@@ -458,17 +497,19 @@ export class SceneManager {
             && (performance.now() - this.lastClickTime < 300)
 
           if (isTouchDoubleTap) {
-            store.selectOnly(selectionItem)
+            store.setSelectedItems(selectionItems)
             store.setPreviewCard(revealPreviewCardId)
             this.lastClickTime = 0
             this.lastClickCardId = null
             this.pendingSelectionItem = null
+            this.pendingSelectionItems = []
             this.pendingCardId = null
             this.isPendingMarquee = false
             return
           }
 
           this.pendingSelectionItem = selectionItem
+          this.pendingSelectionItems = selectionItems
           this.pendingCardId = cardId
           this.isPendingMarquee = false
           return
@@ -493,6 +534,7 @@ export class SceneManager {
     this.dragStartClientPos.set(e.clientX, e.clientY)
     this.isPendingMarquee = true
     this.pendingSelectionItem = null
+    this.pendingSelectionItems = []
     this.pendingCardId = null
   }
 
@@ -507,12 +549,14 @@ export class SceneManager {
       this.isMarqueeSelecting = false
       this.isPendingMarquee = false
       this.pendingSelectionItem = null
+      this.pendingSelectionItems = []
       this.pendingCardId = null
       return
     }
 
     if (this.pendingSelectionItem && !this.activeDragCardId && !this.activeDragDeckId && !this.isGroupDrag) {
       const item = this.pendingSelectionItem
+      const selectionItems = this.pendingSelectionItems.length > 0 ? this.pendingSelectionItems : [item]
       const revealPreviewCardId = this.getRevealPreviewCardId(item, this.pendingCardId)
       const isDoubleClick = revealPreviewCardId !== null
         && this.pendingCardId !== null
@@ -525,9 +569,9 @@ export class SceneManager {
       }
 
       if (this.isAdditiveSelectionEvent(e)) {
-        store.toggleSelection(item)
+        this.toggleSelectionItems(selectionItems)
       } else {
-        store.selectOnly(item)
+        store.setSelectedItems(selectionItems)
       }
 
       if (isDoubleClick && revealPreviewCardId) {
@@ -539,6 +583,7 @@ export class SceneManager {
       }
 
       this.pendingSelectionItem = null
+      this.pendingSelectionItems = []
       this.pendingCardId = null
       return
     }
@@ -552,6 +597,7 @@ export class SceneManager {
         }
       }
       this.isPendingMarquee = false
+      this.pendingSelectionItems = []
       this.draggedCardOrigin = null;
       return;
     }
@@ -615,30 +661,18 @@ export class SceneManager {
        } else if (dropTarget?.type === 'deck') {
           store.addDeckToDeck(this.activeDragDeckId, dropTarget.id);
        } else if (dropTarget?.type === 'card') {
-          // Drop deck onto a single card: add the card to the bottom of the deck
-          store.addCardUnderDeck(dropTarget.id, this.activeDragDeckId);
-          // Move deck to the card's position
           const targetCard = store.cards.find(c => c.id === dropTarget.id);
-          if (targetCard) {
-            store.moveDeck(this.activeDragDeckId, [...targetCard.position], undefined);
+          if (targetCard?.regionId) {
+            store.dropSelectionIntoRegion([{ id: this.activeDragDeckId, kind: 'deck' }], targetCard.regionId);
+          } else {
+            // Drop deck onto a single card: add the card to the bottom of the deck
+            store.addCardUnderDeck(dropTarget.id, this.activeDragDeckId);
+            if (targetCard) {
+              store.moveDeck(this.activeDragDeckId, [...targetCard.position], undefined);
+            }
           }
        } else if (region) {
-          const regionData = store.regions.find(r => r.id === region.id);
-          if (regionData) {
-             store.removeFromLane(this.activeDragDeckId);
-             store.removeFromRegion(this.activeDragDeckId);
-             const labelWorldHeight = getTitleWorldHeight(
-               REGION_TITLE_LAYOUT.worldWidth,
-               REGION_TITLE_LAYOUT.canvasWidth,
-               REGION_TITLE_LAYOUT.canvasHeight,
-             );
-             const cardCenterOffset = getCardCenterOffsetBelowTitle(
-               regionData.depth,
-               REGION_TITLE_LAYOUT.labelCenterOffset,
-               labelWorldHeight,
-             );
-             store.moveDeck(this.activeDragDeckId, [regionData.position[0], 0, regionData.position[2] + cardCenterOffset], undefined, undefined, region.id);
-          }
+          store.dropSelectionIntoRegion([{ id: this.activeDragDeckId, kind: 'deck' }], region.id);
        } else {
           // Dropping on table outside lane
           store.removeFromLane(this.activeDragDeckId);
@@ -677,26 +711,16 @@ export class SceneManager {
 	               }
 	             }
 	          } else if (dropTarget?.type === 'card') {
-	             store.createDeck(this.activeDragCardId, dropTarget.id);
+             const targetCard = store.cards.find((card) => card.id === dropTarget.id)
+             if (targetCard?.regionId) {
+               store.dropSelectionIntoRegion([{ id: this.activeDragCardId, kind: 'card' }], targetCard.regionId);
+             } else {
+	               store.createDeck(this.activeDragCardId, dropTarget.id);
+             }
 	          } else if (dropTarget?.type === 'deck') {
 	             store.addCardToDeck(this.activeDragCardId, dropTarget.id);
 	          } else if (region) {
-             const regionData = store.regions.find(r => r.id === region.id);
-             if (regionData) {
-                store.removeFromLane(this.activeDragCardId);
-                store.removeFromRegion(this.activeDragCardId);
-                const labelWorldHeight = getTitleWorldHeight(
-                  REGION_TITLE_LAYOUT.worldWidth,
-                  REGION_TITLE_LAYOUT.canvasWidth,
-                  REGION_TITLE_LAYOUT.canvasHeight,
-                );
-                const cardCenterOffset = getCardCenterOffsetBelowTitle(
-                  regionData.depth,
-                  REGION_TITLE_LAYOUT.labelCenterOffset,
-                  labelWorldHeight,
-	                );
-	                store.moveCard(this.activeDragCardId, 'table', [regionData.position[0], 0, regionData.position[2] + cardCenterOffset], [0, 0, 0], undefined, region.id);
-	             }
+             store.dropSelectionIntoRegion([{ id: this.activeDragCardId, kind: 'card' }], region.id);
 	          } else {
              // Dropping outside any lane — remove from lane if it was in one
              if (BOARD_CONFIG.allowDirectTableCardDrop === false) {
@@ -724,7 +748,7 @@ export class SceneManager {
              } else {
                this.clearHandPreview();
              }
-          }
+           }
        }
        
        const c3D = this.cards.get(this.activeDragCardId);
@@ -761,20 +785,30 @@ export class SceneManager {
 	    store.setDragging(false, null);
 	  }
 
-  private beginSelectionDrag(anchorItem: SelectionItem) {
+  private beginSelectionDrag(anchorItem: SelectionItem, forcedItems?: SelectionItem[]) {
     const store = useGameStore.getState()
-    const selectedItems = this.isSelectionItemSelected(anchorItem)
-      ? store.selectedItems.filter((item) => this.getRenderableSelectionItem(item))
-      : [anchorItem]
+    const isAnchorSelected = this.isSelectionItemSelected(anchorItem)
+    const shouldUseForcedItems = Boolean(
+      !isAnchorSelected
+      && forcedItems
+      && forcedItems.length > 1
+      && forcedItems.some((item) => item.id !== anchorItem.id || item.kind !== anchorItem.kind),
+    )
+    const selectedItems = shouldUseForcedItems
+      ? forcedItems!.filter((item) => this.getRenderableSelectionItem(item))
+      : isAnchorSelected
+        ? store.selectedItems.filter((item) => this.getRenderableSelectionItem(item))
+        : [anchorItem]
 
-    if (!this.isSelectionItemSelected(anchorItem)) {
-      store.selectOnly(anchorItem)
+    if (!isAnchorSelected || shouldUseForcedItems) {
+      store.setSelectedItems(selectedItems)
     }
 
     const anchorPosition = this.getSelectionItemPosition(anchorItem)
     if (!anchorPosition) return
 
     this.pendingSelectionItem = null
+    this.pendingSelectionItems = []
     this.pendingCardId = null
     this.isPendingMarquee = false
     this.isGroupDrag = true
@@ -811,6 +845,7 @@ export class SceneManager {
     }
 
     this.pendingSelectionItem = null
+    this.pendingSelectionItems = []
     this.pendingCardId = null
     this.isPendingMarquee = false
     this.isGroupDrag = false
@@ -919,6 +954,7 @@ export class SceneManager {
 
   private updateGroupDragPositions(hit: THREE.Vector3) {
     const store = useGameStore.getState()
+    const attachmentGroupId = this.getAttachmentGroupIdForItems(this.dragSelectionEntries.map((entry) => entry.item))
     this.dragSelectionEntries.forEach((entry) => {
       const baseX = hit.x + entry.offset.x
       const baseZ = hit.z + entry.offset.z
@@ -927,6 +963,15 @@ export class SceneManager {
         const card3D = this.cards.get(entry.item.id)
         const cardModel = store.cards.find((card) => card.id === entry.item.id)
         if (!card3D || !cardModel) return
+
+        if (attachmentGroupId && cardModel.attachmentGroupId === attachmentGroupId) {
+          const attachmentIndex = cardModel.attachmentIndex ?? 0
+          const dragEuler = getCardTableEuler(cardModel, 0, 0.3)
+          card3D.group.position.set(baseX, DRAG_PLANE_Y - attachmentIndex * 0.02, baseZ)
+          card3D.group.rotation.set(dragEuler.x, dragEuler.y, dragEuler.z)
+          card3D.group.scale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE)
+          return
+        }
 
         const scatter = this.getDraggedCardScatter(entry.item.id)
         card3D.group.position.set(baseX + scatter.x, DRAG_PLANE_Y + scatter.lift, baseZ + scatter.z)
@@ -973,6 +1018,97 @@ export class SceneManager {
     }
   }
 
+  private getAttachmentGroupIdForItems(items: SelectionItem[]) {
+    if (items.length === 0 || items.some((item) => item.kind !== 'card')) return null
+    const cards = items
+      .map((item) => useGameStore.getState().cards.find((card) => card.id === item.id))
+      .filter((card): card is CardState => Boolean(card))
+    if (cards.length !== items.length) return null
+    const groupId = cards[0]?.attachmentGroupId
+    if (!groupId) return null
+    return cards.every((card) => card.attachmentGroupId === groupId) ? groupId : null
+  }
+
+  private getAttachmentGroupIdForItem(item: SelectionItem) {
+    if (item.kind !== 'card') return null
+    const card = useGameStore.getState().cards.find((entry) => entry.id === item.id)
+    return card?.attachmentGroupId ?? null
+  }
+
+  private getSelectionDropUnits(items: SelectionItem[]): SelectionDropUnit[] {
+    const units: SelectionDropUnit[] = []
+    const consumedItemKeys = new Set<string>()
+    const consumedGroupIds = new Set<string>()
+
+    items.forEach((item) => {
+      const itemKey = `${item.kind}:${item.id}`
+      if (consumedItemKeys.has(itemKey)) return
+
+      const attachmentGroupId = this.getAttachmentGroupIdForItem(item)
+      if (!attachmentGroupId || consumedGroupIds.has(attachmentGroupId)) {
+        consumedItemKeys.add(itemKey)
+        units.push({ kind: 'item', item })
+        return
+      }
+
+      const groupItems = items.filter((entry) => this.getAttachmentGroupIdForItem(entry) === attachmentGroupId)
+      const anchorCard = this.getAttachmentCards(attachmentGroupId)[0]
+      if (!anchorCard || groupItems.length === 0) {
+        consumedItemKeys.add(itemKey)
+        units.push({ kind: 'item', item })
+        return
+      }
+
+      consumedGroupIds.add(attachmentGroupId)
+      groupItems.forEach((entry) => consumedItemKeys.add(`${entry.kind}:${entry.id}`))
+      units.push({
+        kind: 'attachment-group',
+        groupId: attachmentGroupId,
+        anchorItem: { id: anchorCard.id, kind: 'card' },
+        items: groupItems,
+      })
+    })
+
+    return units
+  }
+
+  private getAttachedGroupAnchorItem(items: SelectionItem[]): SelectionItem | null {
+    const groupId = this.getAttachmentGroupIdForItems(items)
+    if (!groupId) return null
+    const anchorCard = this.getAttachmentCards(groupId)[0]
+    return anchorCard ? { id: anchorCard.id, kind: 'card' } : null
+  }
+
+  private getGroupDragPreviewItemId() {
+    const items = this.dragSelectionEntries.map((entry) => entry.item)
+    const anchorItem = this.getAttachedGroupAnchorItem(items)
+    return anchorItem?.id ?? items[0]?.id
+  }
+
+  private getAttachedGroupStackCardIds(groupId: string) {
+    return [...this.getAttachmentCards(groupId)]
+      .reverse()
+      .map((card) => card.id)
+  }
+
+  private getCardDropContext(cardId: string) {
+    const store = useGameStore.getState()
+    const targetCard = store.cards.find((card) => card.id === cardId)
+    if (!targetCard) return null
+
+    const laneIndex = targetCard.laneId
+      ? store.lanes.find((lane) => lane.id === targetCard.laneId)?.itemOrder.indexOf(targetCard.id)
+      : undefined
+
+    return {
+      position: [...targetCard.position] as [number, number, number],
+      rotation: [...targetCard.rotation] as [number, number, number],
+      laneId: targetCard.laneId,
+      regionId: targetCard.regionId,
+      insertIndex: laneIndex !== undefined && laneIndex >= 0 ? laneIndex : undefined,
+    }
+  }
+
   private applyMarqueeSelection(clientX: number, clientY: number, additive: boolean) {
     const store = useGameStore.getState()
     const left = Math.min(this.dragStartClientPos.x, clientX)
@@ -980,11 +1116,11 @@ export class SceneManager {
     const right = Math.max(this.dragStartClientPos.x, clientX)
     const bottom = Math.max(this.dragStartClientPos.y, clientY)
 
-    const selectedByMarquee = this.getSelectableItems().filter((item) => {
+    const selectedByMarquee = this.expandAttachedSelectionItems(this.getSelectableItems().filter((item) => {
       const bounds = this.getSelectionItemScreenBounds(item)
       if (!bounds) return false
       return bounds.x < right && bounds.x + bounds.width > left && bounds.y < bottom && bounds.y + bounds.height > top
-    })
+    }))
 
     const nextSelection = additive
       ? [
@@ -994,6 +1130,20 @@ export class SceneManager {
       : selectedByMarquee
 
     store.setSelectedItems(nextSelection)
+  }
+
+  private expandAttachedSelectionItems(items: SelectionItem[]) {
+    const expanded: SelectionItem[] = []
+    items.forEach((item) => {
+      expanded.push(item)
+      if (item.kind !== 'card') return
+      const card = useGameStore.getState().cards.find((entry) => entry.id === item.id)
+      if (!card?.attachmentGroupId) return
+      this.getAttachmentCards(card.attachmentGroupId).forEach((groupCard) => {
+        expanded.push({ id: groupCard.id, kind: 'card' as const })
+      })
+    })
+    return expanded.filter((item, index) => expanded.findIndex((entry) => entry.id === item.id && entry.kind === item.kind) === index)
   }
 
   private getSelectableItems(): SelectionItem[] {
@@ -1058,6 +1208,11 @@ export class SceneManager {
     }
 
     const store = useGameStore.getState()
+    const attachmentGroupId = this.getAttachmentGroupIdForItems(this.dragSelectionEntries.map((entry) => entry.item))
+    if (attachmentGroupId) {
+      return this.getAttachmentCards(attachmentGroupId).map((card) => ({ id: card.id, kind: 'card' as const }))
+    }
+
     const laneIndexMap = new Map<string, number>()
     store.lanes.forEach((lane) => lane.itemOrder.forEach((id, index) => laneIndexMap.set(id, index)))
 
@@ -1089,9 +1244,83 @@ export class SceneManager {
     const orderedItems = this.getOrderedItemsForDrop()
     const lane = this.findLaneAtPosition(this.lastDragPos.x, this.lastDragPos.z)
     const region = this.findRegionAtPosition(this.lastDragPos.x, this.lastDragPos.z)
+    const dropTarget = this.findDropTarget(this.lastDragPos.x, this.lastDragPos.z, orderedItems.map((item) => item.id))
+    const attachmentGroupId = this.getAttachmentGroupIdForItems(orderedItems)
 
     if (orderedItems.length === 1) {
       this.completeSingleSelectionDrop(orderedItems[0])
+      return
+    }
+
+    if (attachmentGroupId) {
+      const anchorCard = this.getAttachmentCards(attachmentGroupId)[0]
+      const stackCardIds = this.getAttachedGroupStackCardIds(attachmentGroupId)
+      if (lane) {
+        this.dropSelectionIntoLane(orderedItems, lane.id)
+        return
+      }
+
+      if (dropTarget?.type === 'deck') {
+        const targetDeck = store.decks.find((deck) => deck.id === dropTarget.id)
+        if (!targetDeck) {
+          this.restoreGroupDragOrigins()
+          return
+        }
+
+        stackCardIds.forEach((cardId) => {
+          store.addCardToDeck(cardId, targetDeck.id)
+        })
+        return
+      }
+
+      if (dropTarget?.type === 'card') {
+        const targetCard = store.cards.find((card) => card.id === dropTarget.id)
+        if (targetCard?.regionId) {
+          store.dropSelectionIntoRegion(
+            stackCardIds.map((id) => ({ id, kind: 'card' as const })),
+            targetCard.regionId,
+          )
+          return
+        }
+
+        const targetContext = this.getCardDropContext(dropTarget.id)
+        if (!targetCard || !targetContext) {
+          this.restoreGroupDragOrigins()
+          return
+        }
+
+        store.combineSelectionIntoStack(
+          {
+            cardIds: [targetCard.id, ...stackCardIds],
+            deckIds: [],
+            orderedItems: [
+              { id: targetCard.id, kind: 'card' as const },
+              ...stackCardIds.map((id) => ({ id, kind: 'card' as const })),
+            ],
+          },
+          targetContext,
+        )
+        return
+      }
+
+      if (region) {
+        store.dropSelectionIntoRegion(
+          stackCardIds.map((id) => ({ id, kind: 'card' as const })),
+          region.id,
+        )
+        return
+      }
+
+      if (BOARD_CONFIG.allowDirectTableCardDrop === false) {
+        this.restoreGroupDragOrigins()
+        return
+      }
+
+      store.moveAttachmentGroup(
+        attachmentGroupId,
+        [this.lastDragPos.x, 0, this.lastDragPos.z],
+        anchorCard ? [...anchorCard.rotation] as [number, number, number] : [0, 0, 0],
+      )
       return
     }
 
@@ -1110,19 +1339,7 @@ export class SceneManager {
       return
     }
 
-    orderedItems.forEach((item) => {
-      const position = this.getSelectionItemPosition(item)
-      if (!position) return
-      if (item.kind === 'card') {
-        store.removeFromLane(item.id)
-        store.removeFromRegion(item.id)
-        store.moveCard(item.id, 'table', position, [0, 0, 0])
-      } else {
-        store.removeFromLane(item.id)
-        store.removeFromRegion(item.id)
-        store.moveDeck(item.id, position, undefined)
-      }
-    })
+    this.moveSelectionToTable(orderedItems)
   }
 
   private completeSingleSelectionDrop(item: SelectionItem) {
@@ -1143,7 +1360,12 @@ export class SceneManager {
       if (lane) {
         this.dropSelectionIntoLane([item], lane.id)
       } else if (dropTarget?.type === 'card') {
-        store.createDeck(item.id, dropTarget.id)
+        const targetCard = store.cards.find((card) => card.id === dropTarget.id)
+        if (targetCard?.regionId) {
+          this.dropSelectionIntoRegion([item], targetCard.regionId)
+        } else {
+          store.createDeck(item.id, dropTarget.id)
+        }
       } else if (dropTarget?.type === 'deck') {
         store.addCardToDeck(item.id, dropTarget.id)
       } else if (region) {
@@ -1163,10 +1385,14 @@ export class SceneManager {
     } else if (dropTarget?.type === 'deck') {
       store.addDeckToDeck(item.id, dropTarget.id)
     } else if (dropTarget?.type === 'card') {
-      store.addCardUnderDeck(dropTarget.id, item.id)
       const targetCard = store.cards.find((card) => card.id === dropTarget.id)
-      if (targetCard) {
-        store.moveDeck(item.id, [...targetCard.position], undefined)
+      if (targetCard?.regionId) {
+        this.dropSelectionIntoRegion([item], targetCard.regionId)
+      } else {
+        store.addCardUnderDeck(dropTarget.id, item.id)
+        if (targetCard) {
+          store.moveDeck(item.id, [...targetCard.position], undefined)
+        }
       }
     } else if (region) {
       this.dropSelectionIntoRegion([item], region.id)
@@ -1180,55 +1406,95 @@ export class SceneManager {
     const store = useGameStore.getState()
     const laneData = store.lanes.find((lane) => lane.id === laneId)
     if (!laneData) return
+    const attachmentGroupId = this.getAttachmentGroupIdForItems(items)
+
+    if (attachmentGroupId) {
+      const anchorCard = this.getAttachmentCards(attachmentGroupId)[0]
+      if (!anchorCard) return
+
+      store.removeFromLane(anchorCard.id)
+      store.removeFromRegion(anchorCard.id)
+
+      const orderWithoutAnchor = laneData.itemOrder.filter((id) => id !== anchorCard.id)
+      const insertIdx = computeLaneInsertIndex(
+        laneData,
+        this.lastDragPos.x,
+        orderWithoutAnchor.length,
+        store.cards,
+        store.decks,
+        orderWithoutAnchor,
+      )
+      store.insertIntoLane(laneId, anchorCard.id, insertIdx)
+      const slotPos = store.getLaneSlotPosition(laneId, insertIdx)
+      if (slotPos) {
+        store.moveAttachmentGroup(attachmentGroupId, slotPos, [0, 0, 0], laneId)
+      }
+      return
+    }
 
     const itemIds = items.map((item) => item.id)
     const existingOrderWithoutSelection = laneData.itemOrder.filter((id) => !itemIds.includes(id))
     const insertIdx = computeLaneInsertIndex(laneData, this.lastDragPos.x, existingOrderWithoutSelection.length, store.cards, store.decks, existingOrderWithoutSelection)
+    const units = this.getSelectionDropUnits(items)
 
     items.forEach((item) => {
       store.removeFromLane(item.id)
       store.removeFromRegion(item.id)
     })
 
-    items.forEach((item, index) => {
-      store.insertIntoLane(laneId, item.id, insertIdx + index)
+    units.forEach((unit, index) => {
+      store.insertIntoLane(
+        laneId,
+        unit.kind === 'attachment-group' ? unit.anchorItem.id : unit.item.id,
+        insertIdx + index,
+      )
     })
 
-    items.forEach((item, index) => {
+    units.forEach((unit, index) => {
       const slotPos = store.getLaneSlotPosition(laneId, insertIdx + index)
       if (!slotPos) return
-      if (item.kind === 'card') {
-        store.moveCard(item.id, 'table', slotPos, [0, 0, 0], laneId)
+      if (unit.kind === 'attachment-group') {
+        store.moveAttachmentGroup(unit.groupId, slotPos, [0, 0, 0], laneId)
+        return
+      }
+
+      if (unit.item.kind === 'card') {
+        store.moveCard(unit.item.id, 'table', slotPos, [0, 0, 0], laneId)
       } else {
-        store.moveDeck(item.id, slotPos, undefined, laneId)
+        store.moveDeck(unit.item.id, slotPos, undefined, laneId)
       }
     })
   }
 
   private dropSelectionIntoRegion(items: SelectionItem[], regionId: string) {
     const store = useGameStore.getState()
-    const regionData = store.regions.find((region) => region.id === regionId)
-    if (!regionData) return
+    store.dropSelectionIntoRegion(items, regionId)
+  }
 
-    const labelWorldHeight = getTitleWorldHeight(
-      REGION_TITLE_LAYOUT.worldWidth,
-      REGION_TITLE_LAYOUT.canvasWidth,
-      REGION_TITLE_LAYOUT.canvasHeight,
-    )
-    const cardCenterOffset = getCardCenterOffsetBelowTitle(
-      regionData.depth,
-      REGION_TITLE_LAYOUT.labelCenterOffset,
-      labelWorldHeight,
-    )
-    const position: [number, number, number] = [regionData.position[0], 0, regionData.position[2] + cardCenterOffset]
+  private moveSelectionToTable(items: SelectionItem[]) {
+    const store = useGameStore.getState()
+    const units = this.getSelectionDropUnits(items)
 
     items.forEach((item) => {
       store.removeFromLane(item.id)
       store.removeFromRegion(item.id)
-      if (item.kind === 'card') {
-        store.moveCard(item.id, 'table', position, [0, 0, 0], undefined, regionId)
+    })
+
+    units.forEach((unit) => {
+      if (unit.kind === 'attachment-group') {
+        const anchorPosition = this.getSelectionItemPosition(unit.anchorItem)
+        const anchorCard = store.cards.find((card) => card.id === unit.anchorItem.id)
+        if (!anchorPosition || !anchorCard) return
+        store.moveAttachmentGroup(unit.groupId, anchorPosition, [...anchorCard.rotation] as [number, number, number])
+        return
+      }
+
+      const position = this.getSelectionItemPosition(unit.item)
+      if (!position) return
+      if (unit.item.kind === 'card') {
+        store.moveCard(unit.item.id, 'table', position, [0, 0, 0])
       } else {
-        store.moveDeck(item.id, position, undefined, undefined, regionId)
+        store.moveDeck(unit.item.id, position, undefined)
       }
     })
   }
@@ -1258,6 +1524,7 @@ export class SceneManager {
     this.dragOrigins = []
     this.isGroupDrag = false
     this.pendingSelectionItem = null
+    this.pendingSelectionItems = []
     this.pendingCardId = null
     this.hoveredTargetId = null
     this.hoveredTargetType = null
@@ -1614,6 +1881,12 @@ export class SceneManager {
       if (!card3D) continue;
 
       const inDeck = cardData.location === 'deck';
+      const attachmentRenderOrder = cardData.attachmentGroupId
+        ? 40 + (100 - (cardData.attachmentIndex ?? 0))
+        : cardData.location === 'hand'
+          ? 20
+          : 10
+      card3D.setRenderOrder(attachmentRenderOrder);
       const deck = cardToDeckMap.get(cardData.id);
       const isSelectedCard = state.selectedItems.some((item) => item.kind === 'card' && item.id === cardData.id)
       const isSelectedDeck = deck
@@ -1637,6 +1910,45 @@ export class SceneManager {
       const lift = isHoveredTarget ? 0.05 : 0; // slight lift on hover
 
       if (cardData.location === 'table' && !inDeck) {
+        if (cardData.attachmentGroupId) {
+          const anchorCard = storeCards.find((card) => (
+            card.attachmentGroupId === cardData.attachmentGroupId
+            && (card.attachmentIndex ?? 0) === 0
+          ))
+          if (anchorCard) {
+            const attachmentCards = storeCards
+              .filter((card) => card.attachmentGroupId === cardData.attachmentGroupId)
+              .sort((left, right) => (left.attachmentIndex ?? 0) - (right.attachmentIndex ?? 0))
+            const laneForAnchor = anchorCard.laneId ? state.lanes.find((lane) => lane.id === anchorCard.laneId) : null
+            let anchorPosition: [number, number, number] = [...anchorCard.position]
+
+            if (laneForAnchor) {
+              const orderWithout = laneForAnchor.itemOrder.filter((id) => id !== (state.lanePreviewItemId || ''))
+              const displayOrder = [...orderWithout]
+              if (state.lanePreviewLaneId === laneForAnchor.id && state.lanePreviewIndex !== null && state.lanePreviewItemId) {
+                displayOrder.splice(state.lanePreviewIndex, 0, state.lanePreviewItemId)
+              }
+
+              const anchorSlotIndex = displayOrder.indexOf(anchorCard.id)
+              if (anchorSlotIndex !== -1) {
+                anchorPosition = computeLaneSlotPosition(laneForAnchor, anchorSlotIndex, state.cards, state.decks, displayOrder)
+              }
+            }
+
+            const attachedPosition = computeAttachedCardPosition(
+              anchorPosition,
+              cardData.attachmentIndex ?? 0,
+              anchorCard.rotation,
+            )
+            const attachmentIndex = cardData.attachmentIndex ?? 0
+            const stackLift = (attachmentCards.length - 1 - attachmentIndex) * 0.004
+            card3D.targetPosition.set(attachedPosition[0], 0.01 + lift + stackLift, attachedPosition[2])
+            card3D.targetQuaternion.setFromEuler(getCardTableEuler(cardData, wiggleRot))
+            card3D.targetScale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE)
+            continue
+          }
+        }
+
         // Check if this card is in a lane — if so, position from lane ordering
         const laneForCard = cardData.laneId ? state.lanes.find(l => l.id === cardData.laneId) : null;
         if (laneForCard) {
@@ -1658,7 +1970,9 @@ export class SceneManager {
           card3D.targetQuaternion.setFromEuler(getCardTableEuler(cardData, wiggleRot));
           card3D.targetScale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE);
         } else {
-          card3D.targetPosition.set(cardData.position[0], 0.01 + lift, cardData.position[2]);
+          const regionForCard = cardData.regionId ? state.regions.find((region) => region.id === cardData.regionId) : null;
+          const regionPos = regionForCard ? computeRegionCardPosition(regionForCard, cardData.tapped ?? false) : cardData.position;
+          card3D.targetPosition.set(regionPos[0], 0.01 + lift, regionPos[2]);
           card3D.targetQuaternion.setFromEuler(getCardTableEuler(cardData, wiggleRot));
           card3D.targetScale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE);
         }
@@ -1680,20 +1994,26 @@ export class SceneManager {
           const slotPos = computeLaneSlotPosition(laneForDeck, slotIndex, state.cards, state.decks, displayOrder);
           deckBaseX = slotPos[0];
           deckBaseZ = slotPos[2];
+        } else if (deck.regionId) {
+          const regionForDeck = state.regions.find((region) => region.id === deck.regionId);
+          if (regionForDeck) {
+            const topCard = deck.cardIds.length > 0
+              ? state.cards.find((card) => card.id === deck.cardIds[deck.cardIds.length - 1])
+              : null;
+            const regionPos = computeRegionCardPosition(regionForDeck, topCard?.tapped ?? false);
+            deckBaseX = regionPos[0];
+            deckBaseZ = regionPos[2];
+          }
         }
         
         const indexInDeck = deck.cardIds.indexOf(cardData.id);
         const yOffset = 0.01 + lift + indexInDeck * 0.03;
-        const wobX = (indexInDeck % 2 === 0 ? 1 : -1) * 0.005;
-        const wobZ = (indexInDeck % 2 === 0 ? -1 : 1) * 0.003;
         
         card3D.targetPosition.set(deckBaseX, yOffset, deckBaseZ);
         card3D.targetQuaternion.setFromEuler(
           getCardTableEuler(
             { ...cardData, rotation: deck.rotation },
             wiggleRot,
-            wobX,
-            wobZ,
           ),
         );
         card3D.targetScale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE);
@@ -1813,7 +2133,7 @@ export class SceneManager {
       region.dispose();
     }
     this.regions.clear();
-    
+
     this.scene.clear();
   }
 }

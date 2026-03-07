@@ -1,4 +1,4 @@
-import { useGameStore, type GameState, type SelectionItem, type StackTargetContext } from '../store'
+import { useGameStore, type CardState, type GameState, type SelectionItem, type StackTargetContext } from '../store'
 
 export type OrderedSelectionItem = SelectionItem & {
   x: number
@@ -19,6 +19,8 @@ export type SelectionAction =
   | { id: 'flip-cards'; label: 'Flip'; execute: () => void }
   | { id: 'tap-cards'; label: 'Tap'; execute: () => void }
   | { id: 'stack-cards'; label: 'Stack'; execute: () => void }
+  | { id: 'attach-cards'; label: 'Attach'; execute: () => void }
+  | { id: 'detach-attachment'; label: 'Detach'; execute: () => void }
   | { id: 'tap-mixed'; label: 'Tap'; execute: () => void }
   | { id: 'combine'; label: 'Combine'; execute: () => void }
 
@@ -32,6 +34,27 @@ export type SelectionActionSet = {
 type SelectionActionOptions = {
   orderedSelectionItems?: SelectionItem[]
   targetContext?: StackTargetContext
+}
+
+function getSelectedCards(state: GameState, selectedCardIds: string[]): CardState[] {
+  return selectedCardIds
+    .map((id) => state.cards.find((card) => card.id === id))
+    .filter((card): card is CardState => Boolean(card))
+}
+
+function getSingleAttachmentGroupId(cards: GameState['cards']): string | null {
+  if (cards.length === 0) return null
+  const groupId = cards[0]?.attachmentGroupId
+  if (!groupId) return null
+  return cards.every((card) => card.attachmentGroupId === groupId) ? groupId : null
+}
+
+function canAttachCards(cards: GameState['cards']) {
+  return cards.length > 1 && cards.every((card) => (
+    card.location === 'table'
+    && !card.regionId
+    && !card.attachmentGroupId
+  ))
 }
 
 export function getOrderedSelectionItems(
@@ -114,7 +137,10 @@ export function getSelectionActionSet(
   const selectedCardIds = actionItems.filter((item) => item.kind === 'card').map((item) => item.id)
   const selectedDeckIds = actionItems.filter((item) => item.kind === 'deck').map((item) => item.id)
   const targetContext = options.targetContext ?? getStackTargetContext(orderedItems)
-  const { flipCards, tapCards, flipStack, tapDeck, advanceStack, createStackFromCards, combineSelectionIntoStack, setPreviewCard, openDeckExamine } = state
+  const selectedCards = getSelectedCards(state, selectedCardIds)
+  const selectedAttachmentGroupId = getSingleAttachmentGroupId(selectedCards)
+  const canAttachSelection = selectedDeckIds.length === 0 && canAttachCards(selectedCards)
+  const { flipCards, tapCards, flipStack, tapDeck, advanceStack, attachCards, detachAttachmentGroup, createStackFromCards, combineSelectionIntoStack, setPreviewCard, openDeckExamine } = state
 
   const actions: SelectionAction[] = []
 
@@ -149,6 +175,12 @@ export function getSelectionActionSet(
     actions.push(
       { id: 'flip-cards', label: 'Flip', execute: () => flipCards(selectedCardIds) },
       { id: 'tap-cards', label: 'Tap', execute: () => tapCards(selectedCardIds) },
+      ...(selectedAttachmentGroupId
+        ? [{ id: 'detach-attachment', label: 'Detach', execute: () => detachAttachmentGroup(selectedAttachmentGroupId) } satisfies SelectionAction]
+        : []),
+      ...(canAttachSelection
+        ? [{ id: 'attach-cards', label: 'Attach', execute: () => attachCards(selectedCardIds) } satisfies SelectionAction]
+        : []),
       {
         id: 'stack-cards',
         label: 'Stack',

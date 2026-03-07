@@ -5,6 +5,7 @@ import { MODULAR_SETS } from '../config/gameSetup/modulars'
 import { DIFFICULTY_SETS } from '../config/gameSetup/difficulties'
 import { prepareGameSetup } from '../services/gameSetup'
 import { useGameStore } from '../store'
+import { clearStoredGameSession } from '../sessionPersistence'
 
 interface NewGameModalProps {
   isOpen: boolean
@@ -77,6 +78,7 @@ export function NewGameModal({ isOpen, onClose }: NewGameModalProps) {
         difficulty: selectedDifficulty,
         villainMode: villainInHardMode ? 'hard' : 'standard',
       })
+      clearStoredGameSession()
       replaceBoardWithDecks(result)
       onClose()
     } catch (error) {

@@ -1,7 +1,7 @@
 {
   "board": {
     "width": 32.2,
-    "depth": 20.7,
+    "depth": 19.5,
     "padding": 1,
     "allowDirectTableCardDrop": false
   },
@@ -51,6 +51,7 @@
     {
       "id": "region-main-scheme",
       "label": "Main Scheme",
+      "titlePosition": "bottom",
       "x": 0,
       "y": 0,
       "width": 3.625,

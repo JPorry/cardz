@@ -1,9 +1,7 @@
 import * as THREE from 'three';
 import type { CardState } from '../store';
-import { getCardTableEuler } from '../utils/cardOrientation';
+import { CARD_HEIGHT, CARD_WIDTH, getCardTableEuler } from '../utils/cardOrientation';
 
-const CARD_WIDTH = 1.44;
-const CARD_HEIGHT = 2.09;
 const CARD_THICKNESS = 0.025;
 
 export class Card3D {
@@ -102,19 +100,35 @@ export class Card3D {
     const centerGeometry = new THREE.ExtrudeGeometry(cardShape, extrudeSettings);
     centerGeometry.translate(0, 0, -CARD_THICKNESS / 2); // Center on Z
 
-    const centerMat = new THREE.MeshStandardMaterial({ color: 0x222222, transparent: false, opacity: 1 });
+    const centerMat = new THREE.MeshStandardMaterial({
+      color: 0x222222,
+      transparent: false,
+      opacity: 1,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
     const centerMesh = new THREE.Mesh(centerGeometry, centerMat);
     centerMesh.castShadow = true;
     centerMesh.receiveShadow = true;
+    centerMesh.userData.renderOrderOffset = 0;
     this.group.add(centerMesh);
 
     // Front face
     const faceShape = this.createRoundedRectShape(CARD_WIDTH * 0.95, CARD_HEIGHT * 0.95, 0.08);
     const faceGeometry = new THREE.ShapeGeometry(faceShape);
     
-    this.frontMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: false, opacity: 1 });
+    this.frontMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      transparent: false,
+      opacity: 1,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
     this.frontMesh = new THREE.Mesh(faceGeometry, this.frontMat);
     this.frontMesh.position.set(0, 0, CARD_THICKNESS / 2 + 0.005);
+    this.frontMesh.userData.renderOrderOffset = 0;
     
     // Manually fix UVs for the face geometry to ensure they are [0, 1]
     const pos = faceGeometry.attributes.position;
@@ -131,10 +145,18 @@ export class Card3D {
     this.group.add(this.frontMesh);
 
     // Back face
-    this.backMat = new THREE.MeshStandardMaterial({ color: 0xb20000, transparent: false, opacity: 1 });
+    this.backMat = new THREE.MeshStandardMaterial({
+      color: 0xb20000,
+      transparent: false,
+      opacity: 1,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
     this.backMesh = new THREE.Mesh(faceGeometry, this.backMat);
     this.backMesh.position.set(0, 0, -CARD_THICKNESS / 2 - 0.005);
     this.backMesh.rotation.set(0, Math.PI, 0);
+    this.backMesh.userData.renderOrderOffset = 0;
     this.group.add(this.backMesh);
   }
 
@@ -206,6 +228,7 @@ export class Card3D {
     
     const centerMat = new THREE.MeshBasicMaterial({ color: 0x888888, transparent: true, opacity: 0, depthWrite: false });
     const centerMesh = new THREE.Mesh(centerGeometry, centerMat);
+    centerMesh.userData.renderOrderOffset = 0;
     this.ghostGroup.add(centerMesh);
 
     const faceShape = this.createRoundedRectShape(CARD_WIDTH * 0.95, CARD_HEIGHT * 0.95, 0.08);
@@ -214,12 +237,14 @@ export class Card3D {
     const frontMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false });
     const frontMesh = new THREE.Mesh(faceGeometry, frontMat);
     frontMesh.position.set(0, 0, CARD_THICKNESS / 2 + 0.001);
+    frontMesh.userData.renderOrderOffset = 0;
     this.ghostGroup.add(frontMesh);
 
     const backMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false });
     const backMesh = new THREE.Mesh(faceGeometry, backMat);
     backMesh.position.set(0, 0, -CARD_THICKNESS / 2 - 0.001);
     backMesh.rotation.set(0, Math.PI, 0);
+    backMesh.userData.renderOrderOffset = 0;
     this.ghostGroup.add(backMesh);
   }
 
@@ -235,7 +260,8 @@ export class Card3D {
     })
     const selectionMesh = new THREE.Mesh(selectionGeometry, selectionMaterial)
     selectionMesh.position.set(0, 0, CARD_THICKNESS / 2 + 0.003)
-    selectionMesh.renderOrder = 5
+    selectionMesh.userData.renderOrderOffset = 1
+    selectionMesh.renderOrder = 1
     selectionMesh.visible = false
     return selectionMesh
   }
@@ -273,6 +299,17 @@ export class Card3D {
   setCastShadow(cast: boolean) {
     this.group.children.forEach(c => {
       c.castShadow = cast;
+    });
+  }
+
+  setRenderOrder(order: number) {
+    this.group.traverse((object) => {
+      const renderOrderOffset = object.userData.renderOrderOffset ?? 0;
+      object.renderOrder = order + renderOrderOffset;
+    });
+    this.ghostGroup.traverse((object) => {
+      const renderOrderOffset = object.userData.renderOrderOffset ?? 0;
+      object.renderOrder = order + renderOrderOffset;
     });
   }
 

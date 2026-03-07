@@ -3,6 +3,16 @@ import { useGameStore } from '../store'
 import { getSelectionActionSet } from '../utils/selectionActions'
 
 const TOUCH_MENU_DELAY_MS = 350
+const MENU_VIEWPORT_MARGIN = 20
+const MENU_OFFSET = 16
+const MENU_MAX_WIDTH = 188
+const MENU_ROW_HEIGHT = 44
+const MENU_ROW_GAP = 10
+const MENU_PADDING = 10
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max)
+}
 
 export function SelectionOverlay() {
   const selectedItems = useGameStore((state) => state.selectedItems)
@@ -10,10 +20,12 @@ export function SelectionOverlay() {
   const marqueeSelection = useGameStore((state) => state.marqueeSelection)
   const previewCardId = useGameStore((state) => state.previewCardId)
   const isExaminingStack = useGameStore((state) => state.examinedStack !== null)
+  const isDragging = useGameStore((state) => state.isDragging)
   const menuActions = getSelectionActionSet(useGameStore.getState(), selectedItems).actions
   const [supportsImmediateMenu, setSupportsImmediateMenu] = useState(true)
   const [showMenu, setShowMenu] = useState(true)
   const [suppressedSelectionKey, setSuppressedSelectionKey] = useState<string | null>(null)
+  const [dragSuppressedSelectionKey, setDragSuppressedSelectionKey] = useState<string | null>(null)
   const selectionKey = selectedItems.map((item) => `${item.kind}:${item.id}`).join('|')
 
   useEffect(() => {
@@ -35,8 +47,21 @@ export function SelectionOverlay() {
   }, [previewCardId, selectionKey])
 
   useEffect(() => {
+    if (isDragging && selectionKey.length > 0) {
+      setDragSuppressedSelectionKey(selectionKey)
+      setShowMenu(false)
+      return
+    }
+
+    if (!isDragging && dragSuppressedSelectionKey && dragSuppressedSelectionKey !== selectionKey) {
+      setDragSuppressedSelectionKey(null)
+    }
+  }, [isDragging, selectionKey, dragSuppressedSelectionKey])
+
+  useEffect(() => {
     if (selectionKey.length === 0) {
       setSuppressedSelectionKey(null)
+      setDragSuppressedSelectionKey(null)
       setShowMenu(true)
       return
     }
@@ -44,10 +69,19 @@ export function SelectionOverlay() {
     if (suppressedSelectionKey && suppressedSelectionKey !== selectionKey) {
       setSuppressedSelectionKey(null)
     }
-  }, [selectionKey, suppressedSelectionKey])
+
+    if (dragSuppressedSelectionKey && dragSuppressedSelectionKey !== selectionKey) {
+      setDragSuppressedSelectionKey(null)
+    }
+  }, [selectionKey, suppressedSelectionKey, dragSuppressedSelectionKey])
 
   useEffect(() => {
     if (suppressedSelectionKey === selectionKey && selectionKey.length > 0) {
+      setShowMenu(false)
+      return
+    }
+
+    if (dragSuppressedSelectionKey === selectionKey && selectionKey.length > 0) {
       setShowMenu(false)
       return
     }
@@ -60,13 +94,44 @@ export function SelectionOverlay() {
     setShowMenu(false)
     const timeoutId = window.setTimeout(() => setShowMenu(true), TOUCH_MENU_DELAY_MS)
     return () => window.clearTimeout(timeoutId)
-  }, [selectedItems, selectionKey, suppressedSelectionKey, supportsImmediateMenu])
+  }, [selectedItems, selectionKey, suppressedSelectionKey, dragSuppressedSelectionKey, supportsImmediateMenu])
 
   const menuStyle = selectionBounds
-    ? {
-        left: Math.min(window.innerWidth - 180, Math.max(20, selectionBounds.x + selectionBounds.width / 2 - 72)),
-        top: Math.max(20, selectionBounds.y - 72),
-      }
+    ? (() => {
+        const menuWidth = Math.min(MENU_MAX_WIDTH, window.innerWidth - MENU_VIEWPORT_MARGIN * 2)
+        const menuHeight =
+          MENU_PADDING * 2
+          + menuActions.length * MENU_ROW_HEIGHT
+          + Math.max(0, menuActions.length - 1) * MENU_ROW_GAP
+        const maxLeft = Math.max(MENU_VIEWPORT_MARGIN, window.innerWidth - menuWidth - MENU_VIEWPORT_MARGIN)
+        const maxTop = Math.max(MENU_VIEWPORT_MARGIN, window.innerHeight - menuHeight - MENU_VIEWPORT_MARGIN)
+        const preferredRight = selectionBounds.x + selectionBounds.width + MENU_OFFSET
+        const preferredLeft = selectionBounds.x - menuWidth - MENU_OFFSET
+
+        let left = clamp(
+          selectionBounds.x + selectionBounds.width / 2 - menuWidth / 2,
+          MENU_VIEWPORT_MARGIN,
+          maxLeft,
+        )
+
+        if (preferredRight + menuWidth <= window.innerWidth - MENU_VIEWPORT_MARGIN) {
+          left = preferredRight
+        } else if (preferredLeft >= MENU_VIEWPORT_MARGIN) {
+          left = preferredLeft
+        }
+
+        const top = clamp(
+          selectionBounds.y + selectionBounds.height / 2 - menuHeight / 2,
+          MENU_VIEWPORT_MARGIN,
+          maxTop,
+        )
+
+        return {
+          left,
+          top,
+          width: menuWidth,
+        }
+      })()
     : null
 
   const marqueeLeft = Math.min(marqueeSelection.startX, marqueeSelection.currentX)
@@ -87,12 +152,13 @@ export function SelectionOverlay() {
           }}
         />
       )}
-      {selectionBounds && menuStyle && showMenu && menuActions.length > 0 && !isExaminingStack && (
+      {selectionBounds && menuStyle && showMenu && menuActions.length > 0 && !isExaminingStack && !isDragging && (
         <div
           className="selection-menu"
           style={{
             left: menuStyle.left,
             top: menuStyle.top,
+            width: menuStyle.width,
           }}
         >
           {menuActions.map((action) => (
