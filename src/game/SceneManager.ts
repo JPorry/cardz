@@ -20,6 +20,8 @@ const HAND_FOCUSED_LIFT = 1.5;
 const HAND_BASE_Y_OFFSET = -3.5;
 const HAND_VIEWPORT_PADDING = 0.4;
 const DRAG_RENDER_ORDER = 20000;
+const BOARD_SIDE_MARGIN_PX = 20;
+const TABLE_CENTER_Z = -3;
 
 type DraggedCardOrigin = {
   cardId: string;
@@ -114,12 +116,8 @@ export class SceneManager {
   private lastSelectionSignature = '';
   private readonly isTouchDevice: boolean;
 
-  // Zoom controls
   baseCameraPos: THREE.Vector3 = new THREE.Vector3(0, 26, 8);
   targetCameraPos: THREE.Vector3 = new THREE.Vector3(0, 26, 8);
-  currentZoom: number = 1.0;
-  minZoom: number = 0.4;
-  maxZoom: number = 1.5;
 
   constructor(container: HTMLDivElement) {
     this.isTouchDevice = this.detectTouchDevice()
@@ -141,6 +139,7 @@ export class SceneManager {
     // Fix sRGB output encoding (default in R3F)
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(this.renderer.domElement);
+    this.fitCameraToBoard({ snap: true });
 
     // Setup Raycaster
     this.raycaster = new THREE.Raycaster();
@@ -190,7 +189,6 @@ export class SceneManager {
     this.renderer.domElement.addEventListener('pointermove', this.onPointerMove);
     this.renderer.domElement.addEventListener('pointerdown', this.onPointerDown);
     this.renderer.domElement.addEventListener('pointerup', this.onPointerUp);
-    this.renderer.domElement.addEventListener('wheel', this.onWheel, { passive: false });
     
     // Start Loop
     this.start();
@@ -201,14 +199,7 @@ export class SceneManager {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(this.getPreferredPixelRatio());
-    this.invalidateRender({ layout: true, selectionBounds: true, camera: true });
-  }
-
-  private onWheel = (e: WheelEvent) => {
-    e.preventDefault();
-    const zoomSpeed = 0.001;
-    this.currentZoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.currentZoom + e.deltaY * zoomSpeed));
-    this.targetCameraPos.copy(this.baseCameraPos).multiplyScalar(this.currentZoom);
+    this.fitCameraToBoard();
     this.invalidateRender({ layout: true, selectionBounds: true, camera: true });
   }
 
@@ -251,6 +242,93 @@ export class SceneManager {
     dirLight.shadow.bias = -0.001
     dirLight.shadow.radius = 8
     targetScene.add(dirLight)
+  }
+
+  private getViewportDimensions() {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const width = rect.width || window.innerWidth || 1;
+    const height = rect.height || window.innerHeight || 1;
+    return { width, height };
+  }
+
+  private getProjectedBoardBoundsForScale(scale: number) {
+    const boardHalfWidth = BOARD_CONFIG.width / 2;
+    const boardHalfDepth = BOARD_CONFIG.depth / 2;
+    const boardCorners = [
+      new THREE.Vector3(-boardHalfWidth, 0, TABLE_CENTER_Z - boardHalfDepth),
+      new THREE.Vector3(boardHalfWidth, 0, TABLE_CENTER_Z - boardHalfDepth),
+      new THREE.Vector3(-boardHalfWidth, 0, TABLE_CENTER_Z + boardHalfDepth),
+      new THREE.Vector3(boardHalfWidth, 0, TABLE_CENTER_Z + boardHalfDepth),
+    ];
+
+    const cameraPosition = this.baseCameraPos.clone().multiplyScalar(scale);
+    this.camera.position.copy(cameraPosition);
+    this.camera.lookAt(0, 0, 0);
+    this.camera.updateMatrixWorld();
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    for (const corner of boardCorners) {
+      const projected = corner.clone().project(this.camera);
+      minX = Math.min(minX, projected.x);
+      maxX = Math.max(maxX, projected.x);
+      minY = Math.min(minY, projected.y);
+      maxY = Math.max(maxY, projected.y);
+    }
+
+    return { minX, maxX, minY, maxY };
+  }
+
+  private fitCameraToBoard(options?: { snap?: boolean }) {
+    const { width, height } = this.getViewportDimensions();
+    const usableWidth = Math.max(1, width - BOARD_SIDE_MARGIN_PX * 2);
+    const usableHeight = Math.max(1, height - BOARD_SIDE_MARGIN_PX * 2);
+    const targetWidthSpan = (usableWidth / width) * 2;
+    const targetHeightSpan = (usableHeight / height) * 2;
+    const originalCameraPosition = this.camera.position.clone();
+
+    let low = 0.1;
+    let high = 1;
+
+    while (high < 100) {
+      const bounds = this.getProjectedBoardBoundsForScale(high);
+      const widthFits = bounds.maxX - bounds.minX <= targetWidthSpan;
+      const heightFits = bounds.maxY - bounds.minY <= targetHeightSpan;
+      const topFits = bounds.maxY <= 1 - (BOARD_SIDE_MARGIN_PX / height) * 2;
+      const bottomFits = bounds.minY >= -1 + (BOARD_SIDE_MARGIN_PX / height) * 2;
+      if (widthFits && heightFits && topFits && bottomFits) {
+        break;
+      }
+      low = high;
+      high *= 2;
+    }
+
+    for (let iteration = 0; iteration < 30; iteration += 1) {
+      const mid = (low + high) / 2;
+      const bounds = this.getProjectedBoardBoundsForScale(mid);
+      const widthFits = bounds.maxX - bounds.minX <= targetWidthSpan;
+      const heightFits = bounds.maxY - bounds.minY <= targetHeightSpan;
+      const topFits = bounds.maxY <= 1 - (BOARD_SIDE_MARGIN_PX / height) * 2;
+      const bottomFits = bounds.minY >= -1 + (BOARD_SIDE_MARGIN_PX / height) * 2;
+      if (widthFits && heightFits && topFits && bottomFits) {
+        high = mid;
+      } else {
+        low = mid;
+      }
+    }
+
+    this.targetCameraPos.copy(this.baseCameraPos).multiplyScalar(high);
+    if (options?.snap) {
+      this.camera.position.copy(this.targetCameraPos);
+    } else {
+      this.camera.position.copy(originalCameraPosition);
+    }
+
+    this.camera.lookAt(0, 0, 0);
+    this.camera.updateMatrixWorld();
   }
 
   private getPointerCoordsFromClient(clientX: number, clientY: number): THREE.Vector2 {
@@ -2588,7 +2666,6 @@ export class SceneManager {
     this.renderer.domElement.removeEventListener('pointermove', this.onPointerMove);
     this.renderer.domElement.removeEventListener('pointerdown', this.onPointerDown);
     this.renderer.domElement.removeEventListener('pointerup', this.onPointerUp);
-    this.renderer.domElement.removeEventListener('wheel', this.onWheel);
     
     this.renderer.domElement.remove();
     this.renderer.dispose();
