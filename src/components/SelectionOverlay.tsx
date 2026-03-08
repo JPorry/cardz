@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSupportsHoverPreview } from '../hooks/useSupportsHoverPreview'
 import { useGameStore } from '../store'
 import { getSelectionActionSet } from '../utils/selectionActions'
 
@@ -22,23 +23,11 @@ export function SelectionOverlay() {
   const isExaminingStack = useGameStore((state) => state.examinedStack !== null)
   const isDragging = useGameStore((state) => state.isDragging)
   const menuActions = getSelectionActionSet(useGameStore.getState(), selectedItems).actions
-  const [supportsImmediateMenu, setSupportsImmediateMenu] = useState(true)
+  const supportsImmediateMenu = useSupportsHoverPreview()
   const [showMenu, setShowMenu] = useState(true)
   const [suppressedSelectionKey, setSuppressedSelectionKey] = useState<string | null>(null)
   const [dragSuppressedSelectionKey, setDragSuppressedSelectionKey] = useState<string | null>(null)
   const selectionKey = selectedItems.map((item) => `${item.kind}:${item.id}`).join('|')
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
-
-    const mediaQuery = window.matchMedia('(hover: hover) and (pointer: fine)')
-    const updateSupportsImmediateMenu = () => setSupportsImmediateMenu(mediaQuery.matches)
-
-    updateSupportsImmediateMenu()
-    mediaQuery.addEventListener('change', updateSupportsImmediateMenu)
-
-    return () => mediaQuery.removeEventListener('change', updateSupportsImmediateMenu)
-  }, [])
 
   useEffect(() => {
     if (!previewCardId || selectionKey.length === 0) return
@@ -76,6 +65,11 @@ export function SelectionOverlay() {
   }, [selectionKey, suppressedSelectionKey, dragSuppressedSelectionKey])
 
   useEffect(() => {
+    if (marqueeSelection.isActive) {
+      setShowMenu(false)
+      return
+    }
+
     if (suppressedSelectionKey === selectionKey && selectionKey.length > 0) {
       setShowMenu(false)
       return
@@ -94,7 +88,7 @@ export function SelectionOverlay() {
     setShowMenu(false)
     const timeoutId = window.setTimeout(() => setShowMenu(true), TOUCH_MENU_DELAY_MS)
     return () => window.clearTimeout(timeoutId)
-  }, [selectedItems, selectionKey, suppressedSelectionKey, dragSuppressedSelectionKey, supportsImmediateMenu])
+  }, [selectedItems, selectionKey, suppressedSelectionKey, dragSuppressedSelectionKey, supportsImmediateMenu, marqueeSelection.isActive])
 
   const menuStyle = selectionBounds
     ? (() => {

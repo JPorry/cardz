@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useGameStore } from '../store'
+import { useSupportsHoverPreview } from '../hooks/useSupportsHoverPreview'
+import { getSelectionPreviewCardId } from '../utils/previewCards'
 import {
   CARD_COUNTER_BADGE_COLORS,
   CARD_STATUS_BADGE_COLORS,
@@ -63,15 +65,35 @@ export const CardPreview: React.FC = () => {
     hoveredCardScreenX,
     previewCardId,
     cards,
+    decks,
+    selectedItems,
+    selectionBounds,
+    marqueeSelection,
     setPreviewCard,
     adjustCardCounter,
     toggleCardStatus,
   } = useGameStore()
   const [imageAspectRatios, setImageAspectRatios] = useState<Record<string, number>>({})
-  const [supportsHoverPreview, setSupportsHoverPreview] = useState(true)
+  const supportsHoverPreview = useSupportsHoverPreview()
   const previewOpenedAtRef = useRef<number | null>(null)
 
   const hoveredCard = cards.find((c) => c.id === hoveredCardId)
+  const selectedPreviewCardId = (
+    !supportsHoverPreview
+    && !previewCardId
+    && !marqueeSelection.isActive
+    && selectedItems.length === 1
+    && selectedItems[0]
+  )
+    ? getSelectionPreviewCardId({ cards, decks }, selectedItems[0])
+    : null
+  const touchSelectedCard = cards.find((c) => c.id === selectedPreviewCardId)
+  const quickPreviewCard = supportsHoverPreview ? hoveredCard : touchSelectedCard
+  const quickPreviewScreenX = supportsHoverPreview
+    ? hoveredCardScreenX
+    : selectionBounds
+      ? selectionBounds.x + selectionBounds.width / 2
+      : null
   const previewCard = cards.find((c) => c.id === previewCardId)
   const getVisibleArtworkUrl = (card?: typeof hoveredCard) => {
     if (!card) return undefined
@@ -79,11 +101,11 @@ export const CardPreview: React.FC = () => {
       ? card.artworkUrl
       : card.backArtworkUrl
   }
-  const hoveredArtworkUrl = getVisibleArtworkUrl(hoveredCard)
+  const quickPreviewArtworkUrl = getVisibleArtworkUrl(quickPreviewCard)
   const previewArtworkUrl = getVisibleArtworkUrl(previewCard)
 
   useEffect(() => {
-    const urls = [hoveredArtworkUrl, previewArtworkUrl].filter(Boolean) as string[]
+    const urls = [quickPreviewArtworkUrl, previewArtworkUrl].filter(Boolean) as string[]
 
     urls.forEach((url) => {
       if (imageAspectRatios[url]) return
@@ -98,28 +120,16 @@ export const CardPreview: React.FC = () => {
       }
       img.src = url
     })
-  }, [hoveredArtworkUrl, previewArtworkUrl, imageAspectRatios])
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
-
-    const mediaQuery = window.matchMedia('(hover: hover) and (pointer: fine)')
-    const updateSupportsHoverPreview = () => setSupportsHoverPreview(mediaQuery.matches)
-
-    updateSupportsHoverPreview()
-    mediaQuery.addEventListener('change', updateSupportsHoverPreview)
-
-    return () => mediaQuery.removeEventListener('change', updateSupportsHoverPreview)
-  }, [])
+  }, [quickPreviewArtworkUrl, previewArtworkUrl, imageAspectRatios])
 
   useEffect(() => {
     previewOpenedAtRef.current = previewCardId ? performance.now() : null
   }, [previewCardId])
 
-  if (!hoveredCard && !previewCard) return null
+  if (!quickPreviewCard && !previewCard) return null
 
-  const showHoverPreview = supportsHoverPreview && hoveredCard && !previewCardId && hoveredArtworkUrl
-  const isHoveredLeft = hoveredCardScreenX !== null && hoveredCardScreenX < window.innerWidth / 2
+  const showHoverPreview = !!quickPreviewCard && !previewCardId && quickPreviewArtworkUrl
+  const isHoveredLeft = quickPreviewScreenX !== null && quickPreviewScreenX < window.innerWidth / 2
   const showBigPreview = !!previewCard
 
   const getAspectRatio = (artworkUrl?: string) => {
@@ -127,7 +137,7 @@ export const CardPreview: React.FC = () => {
     return imageAspectRatios[artworkUrl] ?? PORTRAIT_RATIO
   }
 
-  const hoverAspectRatio = getAspectRatio(hoveredArtworkUrl)
+  const hoverAspectRatio = getAspectRatio(quickPreviewArtworkUrl)
   const hoverIsLandscape = hoverAspectRatio > 1
   const hoverWidth = hoverIsLandscape
     ? HOVER_LANDSCAPE_WIDTH
@@ -137,11 +147,11 @@ export const CardPreview: React.FC = () => {
     : HOVER_PORTRAIT_HEIGHT
 
   const previewAspectRatio = getAspectRatio(previewArtworkUrl)
-  const hoveredCounters = hoveredCard
-    ? COUNTER_CONTROLS.filter((counter) => hoveredCard.counters[counter.key] > 0)
+  const hoveredCounters = quickPreviewCard
+    ? COUNTER_CONTROLS.filter((counter) => quickPreviewCard.counters[counter.key] > 0)
     : []
-  const hoveredStatuses = hoveredCard
-    ? STATUS_CONTROLS.filter((status) => hoveredCard.statuses[status.key])
+  const hoveredStatuses = quickPreviewCard
+    ? STATUS_CONTROLS.filter((status) => quickPreviewCard.statuses[status.key])
     : []
   const hoverFrameWidth = hoverWidth + (hoveredCounters.length > 0 ? HOVER_COUNTER_RAIL_WIDTH + HOVER_COUNTER_RAIL_GAP : 0)
   const hoverFrameHeight = hoverHeight + (hoveredStatuses.length > 0 ? HOVER_STATUS_RAIL_HEIGHT + HOVER_STATUS_RAIL_GAP : 0)
@@ -152,7 +162,7 @@ export const CardPreview: React.FC = () => {
 
   return (
     <>
-      {showHoverPreview && (
+      {showHoverPreview && quickPreviewCard && (
         <div
           style={{
             position: 'absolute',
@@ -183,8 +193,8 @@ export const CardPreview: React.FC = () => {
             }}
           >
             <img
-              src={hoveredArtworkUrl}
-              alt={hoveredCard.name}
+              src={quickPreviewArtworkUrl}
+              alt={quickPreviewCard.name}
               style={{
                 position: 'absolute',
                 top: 0,
@@ -233,7 +243,7 @@ export const CardPreview: React.FC = () => {
                       {counter.shortLabel}
                     </span>
                     <span style={{ fontSize: '21px', lineHeight: 1, marginTop: '3px' }}>
-                      {hoveredCard.counters[counter.key]}
+                      {quickPreviewCard.counters[counter.key]}
                     </span>
                   </div>
                 ))}

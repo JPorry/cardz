@@ -8,6 +8,7 @@ import { ExamineStrip3D } from './ExamineStrip3D';
 import { getCardBackUrl } from '../services/marvelCdb';
 import { CARD_WIDTH, getCardTableEuler, TABLE_CARD_SCALE } from '../utils/cardOrientation';
 import { BOARD_CONFIG } from '../config/board';
+import { getSelectionPreviewCardId } from '../utils/previewCards';
 
 const DRAG_PLANE_Y = 2.25;
 const HAND_DROP_THRESHOLD = -0.5;
@@ -287,17 +288,7 @@ export class SceneManager {
 
   private getRevealPreviewCardId(item: SelectionItem, fallbackCardId: string | null = null) {
     const store = useGameStore.getState()
-
-    if (item.kind === 'card') {
-      return fallbackCardId
-    }
-
-    const deck = store.decks.find((entry) => entry.id === item.id)
-    if (!deck || deck.cardIds.length === 0) return null
-
-    const topCardId = deck.cardIds[deck.cardIds.length - 1]
-    const topCard = store.cards.find((entry) => entry.id === topCardId)
-    return topCard?.faceUp ? topCardId : null
+    return getSelectionPreviewCardId(store, item, fallbackCardId)
   }
 
   private getExaminedStack() {
