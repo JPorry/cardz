@@ -229,7 +229,7 @@ export class SceneManager {
   }
 
   private getPreferredPixelRatio() {
-    const cap = this.isTouchDevice ? 1.1 : 1.5
+    const cap = this.isTouchDevice ? 2 : 2
     return Math.min(window.devicePixelRatio || 1, cap)
   }
 
@@ -791,6 +791,12 @@ export class SceneManager {
         this.toggleSelectionItems(selectionItems)
       } else {
         store.setSelectedItems(selectionItems)
+      }
+
+      if (this.isTouchLikePointer(e) && this.pendingCardId) {
+        store.setFocusedCard(this.pendingCardId)
+      } else if (!this.isTouchLikePointer(e) && store.focusedCardId !== null) {
+        store.setFocusedCard(null)
       }
 
       if (isDoubleClick && revealPreviewCardId) {

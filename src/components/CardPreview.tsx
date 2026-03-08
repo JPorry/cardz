@@ -64,6 +64,7 @@ export const CardPreview: React.FC = () => {
     hoveredCardId,
     hoveredCardScreenX,
     previewCardId,
+    focusedCardId,
     cards,
     decks,
     selectedItems,
@@ -82,10 +83,14 @@ export const CardPreview: React.FC = () => {
     !supportsHoverPreview
     && !previewCardId
     && !marqueeSelection.isActive
-    && selectedItems.length === 1
-    && selectedItems[0]
+    && selectedItems.length > 0
   )
-    ? getSelectionPreviewCardId({ cards, decks }, selectedItems[0])
+    ? (
+        focusedCardId
+        && selectedItems.some((item) => item.kind === 'card' && item.id === focusedCardId)
+          ? focusedCardId
+          : getSelectionPreviewCardId({ cards, decks }, selectedItems[0])
+      )
     : null
   const touchSelectedCard = cards.find((c) => c.id === selectedPreviewCardId)
   const quickPreviewCard = supportsHoverPreview ? hoveredCard : touchSelectedCard
