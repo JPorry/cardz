@@ -43,6 +43,9 @@ export class Card3D {
   currentArtworkRotation: number = 0;
   currentBackArtworkRotation: number = 0;
   isOverlayRendering: boolean = false;
+  private frontTextureLoadVersion = 0;
+  private backTextureLoadVersion = 0;
+  private metadataSignature: string | null = null;
 
   constructor(cardData: CardState) {
     this.id = cardData.id;
@@ -203,12 +206,25 @@ export class Card3D {
   }
 
   refreshArtwork(artworkUrl?: string, backArtworkUrl?: string) {
+    if (!artworkUrl && this.frontMat?.map) {
+      this.frontMat.map.dispose()
+      this.frontMat.map = null
+      this.currentArtworkUrl = undefined
+      this.frontMat.needsUpdate = true
+    }
     if (artworkUrl && artworkUrl !== this.currentArtworkUrl) {
       this.currentArtworkUrl = artworkUrl;
+      const requestVersion = ++this.frontTextureLoadVersion;
       const loader = new THREE.TextureLoader();
       loader.setCrossOrigin('anonymous');
       loader.load(artworkUrl, (texture) => {
+        if (!this.frontMat || requestVersion !== this.frontTextureLoadVersion || artworkUrl !== this.currentArtworkUrl) {
+          texture.dispose();
+          return;
+        }
+
         if (this.frontMat) {
+          this.frontMat.map?.dispose();
           texture.colorSpace = THREE.SRGBColorSpace;
           texture.minFilter = THREE.LinearFilter;
           texture.magFilter = THREE.LinearFilter;
@@ -222,12 +238,25 @@ export class Card3D {
       });
     }
 
+    if (!backArtworkUrl && this.backMat?.map) {
+      this.backMat.map.dispose()
+      this.backMat.map = null
+      this.currentBackArtworkUrl = undefined
+      this.backMat.needsUpdate = true
+    }
     if (backArtworkUrl && backArtworkUrl !== this.currentBackArtworkUrl) {
       this.currentBackArtworkUrl = backArtworkUrl;
+      const requestVersion = ++this.backTextureLoadVersion;
       const loader = new THREE.TextureLoader();
       loader.setCrossOrigin('anonymous');
       loader.load(backArtworkUrl, (texture) => {
+        if (!this.backMat || requestVersion !== this.backTextureLoadVersion || backArtworkUrl !== this.currentBackArtworkUrl) {
+          texture.dispose();
+          return;
+        }
+
         if (this.backMat) {
+          this.backMat.map?.dispose();
           texture.colorSpace = THREE.SRGBColorSpace;
           texture.minFilter = THREE.LinearFilter;
           texture.magFilter = THREE.LinearFilter;
@@ -554,6 +583,30 @@ export class Card3D {
       (cardData.location === 'table' || options?.showOnTopOfDeck)
       && hasVisibleCardMetadata(cardData.counters, cardData.statuses)
     );
+    const nextSignature = JSON.stringify({
+      faceUp: cardData.faceUp,
+      tapped: cardData.tapped ?? false,
+      location: cardData.location,
+      showOnTopOfDeck: options?.showOnTopOfDeck ?? false,
+      counters: cardData.counters,
+      statuses: cardData.statuses,
+      shouldShow,
+    });
+    if (this.metadataSignature === nextSignature) {
+      return;
+    }
+    this.metadataSignature = nextSignature;
+    const overlayDepthTest = !(options?.showOnTopOfDeck ?? false);
+    const frontMaterial = this.metadataOverlayFront.material as THREE.MeshBasicMaterial;
+    const backMaterial = this.metadataOverlayBack.material as THREE.MeshBasicMaterial;
+    if (frontMaterial.depthTest !== overlayDepthTest) {
+      frontMaterial.depthTest = overlayDepthTest;
+      frontMaterial.needsUpdate = true;
+    }
+    if (backMaterial.depthTest !== overlayDepthTest) {
+      backMaterial.depthTest = overlayDepthTest;
+      backMaterial.needsUpdate = true;
+    }
     this.metadataOverlayFront.visible = shouldShow && cardData.faceUp;
     this.metadataOverlayBack.visible = shouldShow && !cardData.faceUp;
 
@@ -622,17 +675,22 @@ export class Card3D {
 
   update(delta: number) {
     // Smooth lerping for the ghost UI opacity
+    let isAnimating = false
     this.ghostGroup.children.forEach((mesh) => {
       const material = mesh instanceof THREE.Mesh ? mesh.material : null;
       if (material && 'opacity' in material) {
-        material.opacity = THREE.MathUtils.lerp(material.opacity, this.ghostTargetOpacity, 15 * delta);
+        const nextOpacity = THREE.MathUtils.lerp(material.opacity, this.ghostTargetOpacity, 15 * delta);
+        if (Math.abs(nextOpacity - material.opacity) > 0.001 || Math.abs(this.ghostTargetOpacity - nextOpacity) > 0.001) {
+          isAnimating = true
+        }
+        material.opacity = nextOpacity;
       }
     });
 
     if (this.isDragging) {
       // Keep basePosition synced with the manual dragging position
       this.basePosition.copy(this.group.position);
-      return;
+      return true;
     }
 
     // Simulate spring-like damping with lerp/slerp
@@ -655,10 +713,19 @@ export class Card3D {
     let currentLift = 0;
     if (angleDiff > 0.01) {
        currentLift = Math.sin(angleDiff) * flipArcHeight;
+       isAnimating = true
     }
     
     this.group.position.copy(this.basePosition);
     this.group.position.y += currentLift;
+    if (
+      this.group.position.distanceToSquared(this.targetPosition) > 0.0001
+      || angleDiff > 0.001
+      || this.group.scale.distanceToSquared(this.targetScale) > 0.0001
+    ) {
+      isAnimating = true
+    }
+    return isAnimating;
   }
 
   updateTransform() {
@@ -666,5 +733,44 @@ export class Card3D {
     this.group.position.copy(this.targetPosition);
     this.group.quaternion.copy(this.targetQuaternion);
     this.group.scale.copy(this.targetScale);
+  }
+
+  dispose() {
+    this.frontTextureLoadVersion += 1
+    this.backTextureLoadVersion += 1
+    this.frontMat?.map?.dispose()
+    this.backMat?.map?.dispose()
+    this.metadataOverlayFrontTexture?.dispose()
+    this.metadataOverlayBackTexture?.dispose()
+
+    this.group.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return
+      object.geometry.dispose()
+      const material = object.material
+      if (Array.isArray(material)) {
+        material.forEach((entry) => {
+          if ('map' in entry && entry.map instanceof THREE.Texture) {
+            entry.map.dispose()
+          }
+          entry.dispose()
+        })
+        return
+      }
+      if ('map' in material && material.map instanceof THREE.Texture) {
+        material.map.dispose()
+      }
+      material.dispose()
+    })
+
+    this.ghostGroup.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return
+      object.geometry.dispose()
+      const material = object.material
+      if (Array.isArray(material)) {
+        material.forEach((entry) => entry.dispose())
+        return
+      }
+      material.dispose()
+    })
   }
 }

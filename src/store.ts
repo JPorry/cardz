@@ -28,6 +28,7 @@ import {
 
 export type CardLocation = 'deck' | 'hand' | 'table' | 'discard'
 export type SelectionKind = 'card' | 'deck'
+export type DeckKind = 'stack' | 'sequence'
 export type { TitlePosition }
 export interface SelectionItem {
   id: string
@@ -89,13 +90,15 @@ export interface GameSetupLayout {
   playerDeckCards: CardState[]
   playerAreaCards: CardState[]
   villainDeckCards: CardState[]
+  villainSequenceCards: CardState[]
   villainAreaCards: CardState[]
-  mainSchemeStackCards: CardState[]
+  mainSchemeSequenceCards: CardState[]
   nemesisDeckCards: CardState[]
 }
 
 export interface DeckState {
   id: string
+  kind: DeckKind
   position: [number, number, number]
   rotation: [number, number, number]
   cardIds: string[]
@@ -107,6 +110,7 @@ export interface ExaminedStackState {
   deckId: string
   cardOrder: string[]
   originalCardOrder: string[]
+  originalFaceUpCardIds: string[]
   hiddenDeck: boolean
 }
 
@@ -205,6 +209,8 @@ export interface GameState {
   flipStack: (deckId: string) => void
   tapDeck: (deckId: string) => void
   advanceStack: (deckId: string) => void
+  nextSequence: (deckId: string) => void
+  previousSequence: (deckId: string) => void
   attachCards: (cardIds: string[]) => string | null
   detachAttachmentGroup: (groupId: string) => void
   moveAttachmentGroup: (
@@ -231,8 +237,8 @@ export interface GameState {
 
 const LANE_LEFT_PADDING = 1.25
 const LANE_INSERT_SNAP_RATIO = 0.65
-const ATTACHMENT_X_OFFSET = 0.34
-const ATTACHMENT_Z_OFFSET = -0.05
+const ATTACHMENT_X_OFFSET = 0.92
+const ATTACHMENT_Z_OFFSET = -0.03
 const ATTACHMENT_Y_OFFSET = -0.014
 const DETACH_X_OFFSET = 0.62
 const DETACH_Z_OFFSET = 0.06
@@ -241,9 +247,10 @@ function restoreExaminedStackFaceDown(cards: CardState[], examinedStack: Examine
   if (!examinedStack) return cards
 
   const remainingCardIds = new Set(examinedStack.cardOrder)
+  const originalFaceUpCardIds = new Set(examinedStack.originalFaceUpCardIds)
   return cards.map((card) => (
     remainingCardIds.has(card.id)
-      ? { ...card, faceUp: false }
+      ? { ...card, faceUp: originalFaceUpCardIds.has(card.id) }
       : card
   ))
 }
@@ -254,6 +261,14 @@ function toExaminedCardOrder(deckCardIds: string[]) {
 
 function fromExaminedCardOrder(cardOrder: string[]) {
   return [...cardOrder].reverse()
+}
+
+function rotateDeckCardIds(cardIds: string[], direction: 'next' | 'previous') {
+  if (cardIds.length < 2) return cardIds
+  if (direction === 'next') {
+    return [...cardIds.slice(1), cardIds[0]]
+  }
+  return [cardIds[cardIds.length - 1], ...cardIds.slice(0, -1)]
 }
 
 function getLaneLeadingReservedWidth(lane: LaneState) {
@@ -362,8 +377,15 @@ function getLaneItemExtents(
 }
 
 function getDeckTopCard(deck: DeckState, cards: CardState[]): CardState | undefined {
-  const topCardId = deck.cardIds[deck.cardIds.length - 1]
+  const topCardId = getDeckTopCardId(deck)
   return cards.find((card) => card.id === topCardId)
+}
+
+export function getDeckTopCardId(deck: DeckState): string | undefined {
+  if (deck.cardIds.length === 0) return undefined
+  return deck.kind === 'sequence'
+    ? deck.cardIds[0]
+    : deck.cardIds[deck.cardIds.length - 1]
 }
 
 function getLaneItemWidth(
@@ -720,8 +742,12 @@ function buildRegionSettlement(
   }
 
   const deckId = preferredDeckId ?? `deck-${Date.now()}`
+  const preferredDeckKind = preferredDeckId
+    ? state.decks.find((deck) => deck.id === preferredDeckId)?.kind
+    : undefined
   const nextDeck: DeckState = {
     id: deckId,
+    kind: preferredDeckKind ?? 'stack',
     position: [...position],
     rotation: [...normalizedRotation],
     cardIds,
@@ -1012,7 +1038,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       const deck = state.decks.find((d) => d.id === deckId)
       if (!deck || deck.cardIds.length === 0) return state
 
-      const topCardId = deck.cardIds[deck.cardIds.length - 1]
+      const topCardId = getDeckTopCardId(deck)
+      if (!topCardId) return state
 
       return {
         cards: state.cards.map((card) => (
@@ -1039,13 +1066,59 @@ export const useGameStore = create<GameState>((set, get) => ({
       const deck = state.decks.find((entry) => entry.id === deckId)
       if (!deck || deck.cardIds.length < 2) return state
 
-      const advancedIds = [...deck.cardIds.slice(1), deck.cardIds[0]]
+      const advancedIds = rotateDeckCardIds(deck.cardIds, 'next')
       return {
         decks: state.decks.map((entry) => (
           entry.id === deckId
             ? { ...entry, cardIds: advancedIds }
             : entry
         )),
+      }
+    }),
+  nextSequence: (deckId) =>
+    set((state) => {
+      const deck = state.decks.find((entry) => entry.id === deckId)
+      if (!deck || deck.kind !== 'sequence' || deck.cardIds.length < 2) return state
+
+      const rotatedIds = rotateDeckCardIds(deck.cardIds, 'next')
+      const examinedOrder = toExaminedCardOrder(rotatedIds)
+
+      return {
+        decks: state.decks.map((entry) => (
+          entry.id === deckId
+            ? { ...entry, cardIds: rotatedIds }
+            : entry
+        )),
+        examinedStack: state.examinedStack?.deckId === deckId
+          ? {
+              ...state.examinedStack,
+              cardOrder: examinedOrder,
+              originalCardOrder: examinedOrder,
+            }
+          : state.examinedStack,
+      }
+    }),
+  previousSequence: (deckId) =>
+    set((state) => {
+      const deck = state.decks.find((entry) => entry.id === deckId)
+      if (!deck || deck.kind !== 'sequence' || deck.cardIds.length < 2) return state
+
+      const rotatedIds = rotateDeckCardIds(deck.cardIds, 'previous')
+      const examinedOrder = toExaminedCardOrder(rotatedIds)
+
+      return {
+        decks: state.decks.map((entry) => (
+          entry.id === deckId
+            ? { ...entry, cardIds: rotatedIds }
+            : entry
+        )),
+        examinedStack: state.examinedStack?.deckId === deckId
+          ? {
+              ...state.examinedStack,
+              cardOrder: examinedOrder,
+              originalCardOrder: examinedOrder,
+            }
+          : state.examinedStack,
       }
     }),
   attachCards: (cardIds) => {
@@ -1058,9 +1131,28 @@ export const useGameStore = create<GameState>((set, get) => ({
 
       if (orderedCards.length < 2) return state
 
-      const anchorCard = orderedCards[0]
-      newGroupId = `attachment-${Date.now()}`
-      const targetIds = new Set(orderedCards.map((card) => card.id))
+      const existingGroupIds = new Set(
+        orderedCards
+          .map((card) => card.attachmentGroupId)
+          .filter((groupId): groupId is string => Boolean(groupId)),
+      )
+      if (existingGroupIds.size > 1) return state
+
+      const existingGroupId = [...existingGroupIds][0]
+      const existingGroupCards = existingGroupId
+        ? getAttachmentGroupCards(state.cards, existingGroupId)
+        : []
+      const looseCards = orderedCards.filter((card) => !card.attachmentGroupId)
+      if (existingGroupId && looseCards.length === 0) return state
+
+      const nextOrderedCards = existingGroupId
+        ? [...existingGroupCards, ...looseCards]
+        : orderedCards
+      const anchorCard = nextOrderedCards[0]
+      if (!anchorCard) return state
+
+      newGroupId = existingGroupId ?? `attachment-${Date.now()}`
+      const targetIds = new Set(nextOrderedCards.map((card) => card.id))
       const anchorRotation = [...anchorCard.rotation] as [number, number, number]
       const anchorPosition = [...anchorCard.position] as [number, number, number]
       const anchorLaneId = anchorCard.laneId
@@ -1083,7 +1175,7 @@ export const useGameStore = create<GameState>((set, get) => ({
             ...lane,
             itemOrder: buildLaneOrder(
               lane,
-              orderedCards.map((card) => card.id),
+              nextOrderedCards.map((card) => card.id),
               anchorCard.id,
               anchorLaneIndex,
             ),
@@ -1091,7 +1183,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         }),
         cards: state.cards.map((card) => {
           if (!targetIds.has(card.id)) return card
-          const nextIndex = orderedCards.findIndex((entry) => entry.id === card.id)
+          const nextIndex = nextOrderedCards.findIndex((entry) => entry.id === card.id)
           return {
             ...card,
             location: 'table',
@@ -1103,7 +1195,7 @@ export const useGameStore = create<GameState>((set, get) => ({
             attachmentIndex: nextIndex,
           }
         }),
-        selectedItems: orderedCards.map((card) => ({ id: card.id, kind: 'card' as const })),
+        selectedItems: nextOrderedCards.map((card) => ({ id: card.id, kind: 'card' as const })),
       }
     })
     return newGroupId
@@ -1216,6 +1308,7 @@ export const useGameStore = create<GameState>((set, get) => ({
 
       const nextDeck: DeckState = {
         id: newDeckId,
+        kind: 'stack',
         position: [...deckPosition],
         rotation: [...deckRotation],
         cardIds: removedIds,
@@ -1300,6 +1393,7 @@ export const useGameStore = create<GameState>((set, get) => ({
 
       const nextDeck: DeckState = {
         id: newDeckId,
+        kind: 'stack',
         position: [...deckPosition],
         rotation: [...deckRotation],
         cardIds: combinedCardIds,
@@ -1353,6 +1447,9 @@ export const useGameStore = create<GameState>((set, get) => ({
       if (!deck) return state
 
       const examinedCardOrder = toExaminedCardOrder(deck.cardIds)
+      const originalFaceUpCardIds = state.cards
+        .filter((card) => deck.cardIds.includes(card.id) && card.faceUp)
+        .map((card) => card.id)
 
       return {
         cards: state.cards.map((card) => (
@@ -1364,6 +1461,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           deckId,
           cardOrder: examinedCardOrder,
           originalCardOrder: examinedCardOrder,
+          originalFaceUpCardIds,
           hiddenDeck: true,
         },
         selectedItems: [],
@@ -1464,7 +1562,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   shuffleDeck: (deckId) =>
     set((state) => {
       const deck = state.decks.find((entry) => entry.id === deckId)
-      if (!deck) return state
+      if (!deck || deck.kind === 'sequence') return state
 
       const shuffledCardIds = shuffleArray(deck.cardIds)
       return {
@@ -1491,6 +1589,14 @@ export const useGameStore = create<GameState>((set, get) => ({
   closeExaminedStackAndShuffle: () => {
     const examinedStack = get().examinedStack
     if (!examinedStack) return
+    const deck = get().decks.find((entry) => entry.id === examinedStack.deckId)
+    if (!deck || deck.kind === 'sequence') {
+      set((state) => ({
+        cards: restoreExaminedStackFaceDown(state.cards, state.examinedStack),
+        examinedStack: null,
+      }))
+      return
+    }
     get().commitExaminedStackOrder()
     get().shuffleDeck(examinedStack.deckId)
     set((state) => ({
@@ -1510,6 +1616,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       const newDeckId = `deck-${Date.now()}`
       const newDeck: DeckState = {
         id: newDeckId,
+        kind: 'stack',
         position: [...c2.position], // place at card 2 position
         rotation: [...c2.rotation],
         cardIds: [card2Id, card1Id], // card 2 on bottom, card 1 on top
@@ -1556,6 +1663,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   addCardToDeck: (cardId, deckId) =>
     set((state) => {
       const targetDeck = state.decks.find((d) => d.id === deckId);
+      if (!targetDeck || targetDeck.kind === 'sequence') return state
       return {
         lanes: state.lanes.map(lane => ({
           ...lane,
@@ -1589,6 +1697,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   addCardUnderDeck: (cardId, deckId) =>
     set((state) => {
       const targetDeck = state.decks.find((d) => d.id === deckId);
+      if (!targetDeck || targetDeck.kind === 'sequence') return state
       return {
         lanes: state.lanes.map(lane => ({
           ...lane,
@@ -1626,6 +1735,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       const sourceDeck = state.decks.find(d => d.id === sourceDeckId)
       const targetDeck = state.decks.find(d => d.id === targetDeckId)
       if (!sourceDeck || !targetDeck || sourceDeckId === targetDeckId) return state
+      if (sourceDeck.kind === 'sequence' || targetDeck.kind === 'sequence') return state
       
       return {
         lanes: state.lanes.map(lane => {
@@ -1992,11 +2102,15 @@ export const useGameStore = create<GameState>((set, get) => ({
 
       const heroDeckId = 'deck-hero'
       const encounterDeckId = 'deck-encounter'
+      const villainSequenceDeckId = 'deck-villain'
       const mainSchemeDeckId = 'deck-main-scheme'
       const nemesisDeckId = 'deck-nemesis'
 
       const playerAreaOrder = setup.playerAreaCards.map((card) => card.id)
-      const villainAreaOrder = setup.villainAreaCards.map((card) => card.id)
+      const villainAreaOrder = [
+        ...(setup.villainSequenceCards.length > 0 ? [villainSequenceDeckId] : []),
+        ...setup.villainAreaCards.map((card) => card.id),
+      ]
 
       const preparedPlayerDeckCards = prepareCardsForRegion(
         setup.playerDeckCards,
@@ -2021,16 +2135,44 @@ export const useGameStore = create<GameState>((set, get) => ({
         freshLanes,
         freshRegions,
       )
-      const preparedVillainAreaCards = prepareCardsForLane(
-        setup.villainAreaCards,
-        villainAreaLane,
-        villainAreaOrder,
-        freshLanes,
-        freshRegions,
-        true,
-      )
+      const preparedVillainSequenceCards = setup.villainSequenceCards.map((card) => (
+        applyFaceStateFromContainer(
+          normalizeCardForDeck({
+            ...card,
+            location: 'deck' as const,
+            laneId: undefined,
+            regionId: undefined,
+            position: computeLaneSlotPosition(villainAreaLane, 0, [], [], villainAreaOrder),
+            rotation: [0, 0, 0] as [number, number, number],
+            attachmentGroupId: undefined,
+            attachmentIndex: undefined,
+          }),
+          freshLanes,
+          freshRegions,
+          villainAreaLane.id,
+          undefined,
+        )
+      ))
+      const preparedVillainAreaCards = setup.villainAreaCards.map((card, index) => (
+        applyFaceStateFromContainer(
+          {
+            ...card,
+            location: 'table' as const,
+            laneId: villainAreaLane.id,
+            regionId: undefined,
+            position: computeLaneSlotPosition(villainAreaLane, index + (setup.villainSequenceCards.length > 0 ? 1 : 0), setup.villainAreaCards, [], villainAreaOrder),
+            rotation: [0, 0, 0] as [number, number, number],
+            faceUp: true,
+          },
+          freshLanes,
+          freshRegions,
+          villainAreaLane.id,
+          undefined,
+          true,
+        )
+      ))
       const preparedMainSchemeCards = prepareCardsForRegion(
-        setup.mainSchemeStackCards,
+        setup.mainSchemeSequenceCards,
         mainSchemeRegion,
         freshLanes,
         freshRegions,
@@ -2045,6 +2187,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       const nextDecks: DeckState[] = [
         {
           id: heroDeckId,
+          kind: 'stack' as const,
           position: computeRegionCardPosition(playerDeckRegion),
           rotation: [0, 0, 0] as [number, number, number],
           cardIds: preparedPlayerDeckCards.map((card) => card.id),
@@ -2052,13 +2195,23 @@ export const useGameStore = create<GameState>((set, get) => ({
         },
         {
           id: encounterDeckId,
+          kind: 'stack' as const,
           position: computeRegionCardPosition(villainDeckRegion),
           rotation: [0, 0, 0] as [number, number, number],
           cardIds: preparedVillainDeckCards.map((card) => card.id),
           regionId: villainDeckRegion.id,
         },
         {
+          id: villainSequenceDeckId,
+          kind: 'sequence' as const,
+          position: computeLaneSlotPosition(villainAreaLane, 0, [], [], villainAreaOrder),
+          rotation: [0, 0, 0] as [number, number, number],
+          cardIds: preparedVillainSequenceCards.map((card) => card.id),
+          laneId: villainAreaLane.id,
+        },
+        {
           id: mainSchemeDeckId,
+          kind: 'sequence' as const,
           position: computeRegionCardPosition(mainSchemeRegion, true),
           rotation: [0, 0, 0] as [number, number, number],
           cardIds: preparedMainSchemeCards.map((card) => card.id),
@@ -2066,6 +2219,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         },
         {
           id: nemesisDeckId,
+          kind: 'stack' as const,
           position: computeRegionCardPosition(nemesisDeckRegion),
           rotation: [0, 0, 0] as [number, number, number],
           cardIds: preparedNemesisCards.map((card) => card.id),
@@ -2078,6 +2232,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           ...preparedPlayerDeckCards,
           ...preparedPlayerAreaCards,
           ...preparedVillainDeckCards,
+          ...preparedVillainSequenceCards,
           ...preparedVillainAreaCards,
           ...preparedMainSchemeCards,
           ...preparedNemesisCards,

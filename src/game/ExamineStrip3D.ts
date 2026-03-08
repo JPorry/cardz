@@ -128,6 +128,8 @@ export class ExamineStrip3D {
   private subtitleMesh: THREE.Mesh
   private keepButtonMesh: THREE.Mesh
   private shuffleButtonMesh: THREE.Mesh
+  private currentTitle = 'Examine Stack'
+  private shuffleEnabled = true
 
   constructor() {
     this.group = new THREE.Group()
@@ -235,6 +237,25 @@ export class ExamineStrip3D {
     this.disposeMesh(this.subtitleMesh)
     this.subtitleMesh = nextMesh
     this.group.add(this.subtitleMesh)
+  }
+
+  setTitle(title: string) {
+    if (title === this.currentTitle) return
+    const nextMesh = createTextPlane(title, 6.8, 0.62, { fontSize: 92, fontWeight: 700 })
+    nextMesh.position.copy(this.titleMesh.position)
+    nextMesh.renderOrder = STRIP_RENDER_ORDER_BASE + 2
+    ;(nextMesh.material as THREE.MeshBasicMaterial).depthTest = false
+    this.group.remove(this.titleMesh)
+    this.disposeMesh(this.titleMesh)
+    this.titleMesh = nextMesh
+    this.currentTitle = title
+    this.group.add(this.titleMesh)
+  }
+
+  setShuffleEnabled(enabled: boolean) {
+    if (enabled === this.shuffleEnabled) return
+    this.shuffleButtonMesh.visible = enabled
+    this.shuffleEnabled = enabled
   }
 
   getButtonMeshes() {

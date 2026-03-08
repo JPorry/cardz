@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent } from 'react'
 import { executeFlipShortcut, executeStackShortcut, executeTapShortcut } from '../utils/selectionActions'
-import { useGameStore } from '../store'
+import { getDeckTopCardId, useGameStore } from '../store'
 import { getCardBackUrl } from '../services/marvelCdb'
 import { BOARD_SHORTCUTS, COUNTER_SHORTCUT_KEYS, STATUS_SHORTCUT_KEYS } from '../config/shortcuts'
 
@@ -48,7 +48,7 @@ export function BoardShortcuts({ disabled = false }: BoardShortcutsProps) {
 
     const isVisibleTableCard = card.location === 'table'
     const isVisibleTopOfDeck = card.location === 'deck' && store.decks.some((deck) => (
-      deck.cardIds[deck.cardIds.length - 1] === card.id
+      getDeckTopCardId(deck) === card.id
     ))
     if (!isVisibleTableCard && !isVisibleTopOfDeck) {
       return false

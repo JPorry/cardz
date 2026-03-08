@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { useGameStore, computeAttachedCardPosition, computeLaneInsertIndex, computeLaneSlotPosition, computeRegionCardPosition, type CardState, type DeckState, type GameState, type HoverCardZone, type SelectionItem } from '../store';
+import { useGameStore, computeAttachedCardPosition, computeLaneInsertIndex, computeLaneSlotPosition, computeRegionCardPosition, getDeckTopCardId, type CardState, type DeckState, type GameState, type HoverCardZone, type SelectionItem } from '../store';
 import { Card3D } from './Card3D';
 import { Table3D } from './Table3D';
 import { Lane3D } from './Lane3D';
@@ -24,7 +24,7 @@ const DRAG_RENDER_ORDER = 20000;
 type DraggedCardOrigin = {
   cardId: string;
   card: Pick<CardState, 'location' | 'position' | 'rotation' | 'faceUp' | 'laneId' | 'regionId'>;
-  sourceDeck?: Pick<DeckState, 'id' | 'position' | 'rotation' | 'cardIds' | 'laneId' | 'regionId'> & {
+  sourceDeck?: Pick<DeckState, 'id' | 'kind' | 'position' | 'rotation' | 'cardIds' | 'laneId' | 'regionId'> & {
     laneIndex?: number;
   };
   examinedStack?: {
@@ -105,6 +105,14 @@ export class SceneManager {
 
   animationFrameId: number | null = null;
   clock: THREE.Clock = new THREE.Clock();
+  private storeUnsubscribe: (() => void) | null = null;
+  private isDestroyed = false;
+  private isVisible = typeof document === 'undefined' ? true : document.visibilityState === 'visible';
+  private layoutDirty = true;
+  private selectionBoundsDirty = true;
+  private cameraDirty = true;
+  private lastSelectionSignature = '';
+  private readonly isTouchDevice: boolean;
 
   // Zoom controls
   baseCameraPos: THREE.Vector3 = new THREE.Vector3(0, 26, 8);
@@ -114,6 +122,7 @@ export class SceneManager {
   maxZoom: number = 1.5;
 
   constructor(container: HTMLDivElement) {
+    this.isTouchDevice = this.detectTouchDevice()
     this.scene = new THREE.Scene();
     this.overlayScene = new THREE.Scene();
     
@@ -123,11 +132,11 @@ export class SceneManager {
     this.camera.lookAt(0, 0, 0);
 
     // Setup Renderer
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, logarithmicDepthBuffer: true });
+    this.renderer = new THREE.WebGLRenderer({ antialias: !this.isTouchDevice, alpha: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(window.devicePixelRatio);
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.setPixelRatio(this.getPreferredPixelRatio());
+    this.renderer.shadowMap.enabled = !this.isTouchDevice;
+    this.renderer.shadowMap.type = this.isTouchDevice ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
     this.renderer.autoClear = false;
     // Fix sRGB output encoding (default in R3F)
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -169,13 +178,15 @@ export class SceneManager {
     this.sync(storeState);
 
     // Subscribe to store updates
-    useGameStore.subscribe((state) => {
+    this.storeUnsubscribe = useGameStore.subscribe((state) => {
       this.sync(state);
       this.syncActiveGroupDrag(state);
+      this.invalidateRender({ layout: true, selectionBounds: true });
     });
 
     // Event Listeners
     window.addEventListener('resize', this.onWindowResize);
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
     this.renderer.domElement.addEventListener('pointermove', this.onPointerMove);
     this.renderer.domElement.addEventListener('pointerdown', this.onPointerDown);
     this.renderer.domElement.addEventListener('pointerup', this.onPointerUp);
@@ -189,6 +200,8 @@ export class SceneManager {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setPixelRatio(this.getPreferredPixelRatio());
+    this.invalidateRender({ layout: true, selectionBounds: true, camera: true });
   }
 
   private onWheel = (e: WheelEvent) => {
@@ -196,6 +209,28 @@ export class SceneManager {
     const zoomSpeed = 0.001;
     this.currentZoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.currentZoom + e.deltaY * zoomSpeed));
     this.targetCameraPos.copy(this.baseCameraPos).multiplyScalar(this.currentZoom);
+    this.invalidateRender({ layout: true, selectionBounds: true, camera: true });
+  }
+
+  private onVisibilityChange = () => {
+    this.isVisible = document.visibilityState === 'visible';
+    if (!this.isVisible && this.animationFrameId !== null) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+      return;
+    }
+
+    this.invalidateRender({ layout: true, selectionBounds: true, camera: true });
+  }
+
+  private detectTouchDevice() {
+    if (typeof window === 'undefined') return false
+    return window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0
+  }
+
+  private getPreferredPixelRatio() {
+    const cap = this.isTouchDevice ? 1.1 : 1.5
+    return Math.min(window.devicePixelRatio || 1, cap)
   }
 
   private addSceneLights(targetScene: THREE.Scene) {
@@ -390,7 +425,7 @@ export class SceneManager {
     const deck = store.decks.find((entry) => entry.cardIds.includes(card.id))
     if (!deck) return null
 
-    const topCardId = deck.cardIds[deck.cardIds.length - 1]
+    const topCardId = getDeckTopCardId(deck)
     return topCardId === card.id ? card : null
   }
 
@@ -407,6 +442,7 @@ export class SceneManager {
   }
 
   private onPointerMove = (e: PointerEvent) => {
+    this.scheduleRender()
     this.pointer.copy(this.getPointerCoords(e));
     const store = useGameStore.getState();
     const dist = Math.hypot(e.clientX - this.dragStartClientPos.x, e.clientY - this.dragStartClientPos.y);
@@ -617,6 +653,7 @@ export class SceneManager {
   }
 
   private onPointerDown = (e: PointerEvent) => {
+    this.scheduleRender()
     // Left click only
     if (e.button !== 0) return;
     
@@ -720,6 +757,7 @@ export class SceneManager {
   }
 
   private onPointerUp = (e: PointerEvent) => {
+    this.scheduleRender()
     const store = useGameStore.getState();
     const dist = Math.hypot(e.clientX - this.dragStartClientPos.x, e.clientY - this.dragStartClientPos.y);
     const now = performance.now();
@@ -819,6 +857,7 @@ export class SceneManager {
     // Drop logic
     if (this.activeDragDeckId && this.isFullDeckDrag) {
        const deck = store.decks.find(d => d.id === this.activeDragDeckId);
+       const isSequenceDeck = deck?.kind === 'sequence';
        const dropTarget = this.findDropTarget(this.lastDragPos.x, this.lastDragPos.z, [this.activeDragDeckId]);
        const lane = this.findLaneAtPosition(this.lastDragPos.x, this.lastDragPos.z);
        const region = this.findRegionAtPosition(this.lastDragPos.x, this.lastDragPos.z);
@@ -839,9 +878,9 @@ export class SceneManager {
               store.moveDeck(this.activeDragDeckId, [this.lastDragPos.x, 0, this.lastDragPos.z], undefined);
             }
           }
-       } else if (dropTarget?.type === 'deck') {
+       } else if (dropTarget?.type === 'deck' && !isSequenceDeck) {
           store.addDeckToDeck(this.activeDragDeckId, dropTarget.id);
-       } else if (dropTarget?.type === 'card') {
+       } else if (dropTarget?.type === 'card' && !isSequenceDeck) {
           const targetCard = store.cards.find(c => c.id === dropTarget.id);
           if (targetCard?.regionId) {
             store.dropSelectionIntoRegion([{ id: this.activeDragDeckId, kind: 'deck' }], targetCard.regionId, false);
@@ -854,6 +893,14 @@ export class SceneManager {
           }
        } else if (region) {
           store.dropSelectionIntoRegion([{ id: this.activeDragDeckId, kind: 'deck' }], region.id, false);
+       } else if (dropTarget?.type === 'card' && isSequenceDeck) {
+          const targetCard = store.cards.find(c => c.id === dropTarget.id);
+          if (targetCard?.regionId) {
+            store.dropSelectionIntoRegion([{ id: this.activeDragDeckId, kind: 'deck' }], targetCard.regionId, false);
+          } else {
+            store.removeFromLane(this.activeDragDeckId);
+            store.moveDeck(this.activeDragDeckId, [this.lastDragPos.x, 0, this.lastDragPos.z], undefined);
+          }
        } else {
           // Dropping on table outside lane
           store.removeFromLane(this.activeDragDeckId);
@@ -1069,6 +1116,15 @@ export class SceneManager {
       const sourceDeck = store.decks.find((deck) => deck.cardIds.includes(cardId))
       if (!sourceDeck) return
 
+      if (sourceDeck.kind === 'sequence') {
+        this.activeDragCardId = null
+        this.activeDragDeckId = sourceDeck.id
+        this.isFullDeckDrag = true
+        this.markSelectionDragging([{ id: sourceDeck.id, kind: 'deck' }], true)
+        store.setDragging(true, 'deck', sourceDeck.id)
+        return
+      }
+
       this.rememberDraggedCardOrigin(cardModel, sourceDeck)
       const extractedCardId = store.removeTopCardFromDeck(sourceDeck.id) ?? cardId
       this.activeDragCardId = extractedCardId
@@ -1214,14 +1270,26 @@ export class SceneManager {
 
       const deck = store.decks.find((entryDeck) => entryDeck.id === entry.item.id)
       if (!deck) return
+      const deckTopCardId = getDeckTopCardId(deck)
+      const deckTopCard = deckTopCardId
+        ? store.cards.find((card) => card.id === deckTopCardId) ?? null
+        : null
       deck.cardIds.forEach((cardId, index) => {
         const card3D = this.cards.get(cardId)
         const cardModel = store.cards.find((card) => card.id === cardId)
         if (!card3D || !cardModel) return
 
-        card3D.group.position.set(baseX, DRAG_PLANE_Y + index * 0.03, baseZ)
+        const depthIndex = deck.kind === 'sequence'
+          ? deck.cardIds.length - 1 - index
+          : index
+        card3D.group.position.set(baseX, DRAG_PLANE_Y + depthIndex * 0.03, baseZ)
         const wobble = (index % 2 === 0 ? 1 : -1) * 0.015 * index
-        const dragEuler = getCardTableEuler({ ...cardModel, rotation: deck.rotation }, 0, 0.3, wobble)
+        const dragEuler = getCardTableEuler({
+          ...cardModel,
+          rotation: deck.rotation,
+          faceUp: deckTopCard?.faceUp ?? cardModel.faceUp,
+          tapped: deckTopCard?.tapped ?? cardModel.tapped,
+        }, 0, 0.3, wobble)
         card3D.group.rotation.set(dragEuler.x, dragEuler.y, dragEuler.z)
         card3D.group.scale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE)
       })
@@ -1803,6 +1871,7 @@ export class SceneManager {
       },
       sourceDeck: sourceDeck ? {
         id: sourceDeck.id,
+        kind: sourceDeck.kind,
         position: [...sourceDeck.position],
         rotation: [...sourceDeck.rotation],
         cardIds: [...sourceDeck.cardIds],
@@ -2098,6 +2167,7 @@ export class SceneManager {
       this.scene.remove(card3D.ghostGroup)
       this.overlayScene.remove(card3D.group)
       this.overlayScene.remove(card3D.ghostGroup)
+      card3D.dispose()
       this.cards.delete(cardId)
     }
 
@@ -2117,7 +2187,7 @@ export class SceneManager {
         const deck = state.decks.find((entry) => entry.cardIds.includes(data.id))
         const showOnTopOfDeck = Boolean(
           deck
-          && deck.cardIds[deck.cardIds.length - 1] === data.id
+          && getDeckTopCardId(deck) === data.id
           && (
             data.faceUp
             || (
@@ -2132,9 +2202,14 @@ export class SceneManager {
 
     this.examineStrip.group.visible = Boolean(state.examinedStack)
     if (state.examinedStack) {
+      const examinedDeck = state.decks.find((entry) => entry.id === state.examinedStack?.deckId)
+      this.examineStrip.setTitle(examinedDeck?.kind === 'sequence' ? 'Examine Sequence' : 'Examine Stack')
+      this.examineStrip.setShuffleEnabled(examinedDeck?.kind !== 'sequence')
       this.examineStrip.updateCardCount(state.examinedStack.cardOrder.length)
     }
 
+    this.layoutDirty = true
+    this.selectionBoundsDirty = true
     this.updateLayout(state);
 
     newlyExaminedCardIds.forEach((cardId) => {
@@ -2149,13 +2224,40 @@ export class SceneManager {
     // 2. Compute Layout directly in SceneManager instead of individual Cards
     const storeCards = state.cards;
     const storeDecks = state.decks;
-
-    // Map cards to decks for quick lookup
     const cardToDeckMap = new Map<string, DeckState>();
+    const cardById = new Map(storeCards.map((card) => [card.id, card]))
+    const laneById = new Map(state.lanes.map((lane) => [lane.id, lane]))
+    const regionById = new Map(state.regions.map((region) => [region.id, region]))
+    const attachmentGroups = new Map<string, CardState[]>()
+    const selectedCardIds = new Set(state.selectedItems.filter((item) => item.kind === 'card').map((item) => item.id))
+    const selectedDeckIds = new Set(state.selectedItems.filter((item) => item.kind === 'deck').map((item) => item.id))
+    const examinedCardIndexMap = new Map<string, number>((state.examinedStack?.cardOrder ?? []).map((cardId, index) => [cardId, index]))
+
     for (const deck of storeDecks) {
       for (const cardId of deck.cardIds) {
         cardToDeckMap.set(cardId, deck);
       }
+    }
+
+    for (const card of storeCards) {
+      if (!card.attachmentGroupId) continue
+      const group = attachmentGroups.get(card.attachmentGroupId)
+      if (group) {
+        group.push(card)
+      } else {
+        attachmentGroups.set(card.attachmentGroupId, [card])
+      }
+    }
+    attachmentGroups.forEach((group) => group.sort((left, right) => (left.attachmentIndex ?? 0) - (right.attachmentIndex ?? 0)))
+
+    const laneDisplayOrders = new Map<string, string[]>()
+    for (const lane of state.lanes) {
+      const orderWithout = lane.itemOrder.filter((id) => id !== (state.lanePreviewItemId || ''))
+      const displayOrder = [...orderWithout]
+      if (state.lanePreviewLaneId === lane.id && state.lanePreviewIndex !== null && state.lanePreviewItemId) {
+        displayOrder.splice(state.lanePreviewIndex, 0, state.lanePreviewItemId)
+      }
+      laneDisplayOrders.set(lane.id, displayOrder)
     }
 
     const handCards = storeCards.filter((c: CardState) => c.location === 'hand');
@@ -2170,27 +2272,31 @@ export class SceneManager {
       displayHandIds.splice(clampedPreviewIndex, 0, state.handPreviewItemId);
     }
     const totalHandCards = displayHandIds.length;
+    const handIndexMap = new Map(displayHandIds.map((cardId, index) => [cardId, index]))
 
     for (const cardData of storeCards) {
       const card3D = this.cards.get(cardData.id);
       if (!card3D) continue;
 
       const inDeck = cardData.location === 'deck';
-      const handIndex = cardData.location === 'hand' ? displayHandIds.indexOf(cardData.id) : -1
-      const examinedIndex = this.getExaminedCardIndex(cardData.id)
+      const handIndex = cardData.location === 'hand' ? (handIndexMap.get(cardData.id) ?? -1) : -1
+      const examinedIndex = examinedCardIndexMap.get(cardData.id) ?? -1
       card3D.setOverlayRendering(examinedIndex >= 0)
+      const deck = cardToDeckMap.get(cardData.id);
+      const isVisibleDeckCard = Boolean(deck && getDeckTopCardId(deck) === cardData.id)
       const attachmentRenderOrder = examinedIndex >= 0
         ? 11000 + examinedIndex
         : cardData.attachmentGroupId
         ? 40 + (100 - (cardData.attachmentIndex ?? 0))
         : cardData.location === 'hand'
           ? 200 + Math.max(0, handIndex)
+          : inDeck && isVisibleDeckCard
+            ? 25
           : 10
       card3D.setRenderOrder(card3D.isDragging ? DRAG_RENDER_ORDER : attachmentRenderOrder);
-      const deck = cardToDeckMap.get(cardData.id);
-      const isSelectedCard = state.selectedItems.some((item) => item.kind === 'card' && item.id === cardData.id)
+      const isSelectedCard = selectedCardIds.has(cardData.id)
       const isSelectedDeck = deck
-        ? state.selectedItems.some((item) => item.kind === 'deck' && item.id === deck.id) && deck.cardIds[deck.cardIds.length - 1] === cardData.id
+        ? selectedDeckIds.has(deck.id) && getDeckTopCardId(deck) === cardData.id
         : false
       card3D.setSelected(isSelectedCard || isSelectedDeck, isSelectedDeck)
       card3D.setCastShadow(cardData.location === 'table' || inDeck || card3D.isDragging);
@@ -2219,24 +2325,14 @@ export class SceneManager {
 
       if (cardData.location === 'table' && !inDeck) {
         if (cardData.attachmentGroupId) {
-          const anchorCard = storeCards.find((card) => (
-            card.attachmentGroupId === cardData.attachmentGroupId
-            && (card.attachmentIndex ?? 0) === 0
-          ))
+          const attachmentCards = attachmentGroups.get(cardData.attachmentGroupId) ?? []
+          const anchorCard = attachmentCards[0]
           if (anchorCard) {
-            const attachmentCards = storeCards
-              .filter((card) => card.attachmentGroupId === cardData.attachmentGroupId)
-              .sort((left, right) => (left.attachmentIndex ?? 0) - (right.attachmentIndex ?? 0))
-            const laneForAnchor = anchorCard.laneId ? state.lanes.find((lane) => lane.id === anchorCard.laneId) : null
+            const laneForAnchor = anchorCard.laneId ? (laneById.get(anchorCard.laneId) ?? null) : null
             let anchorPosition: [number, number, number] = [...anchorCard.position]
 
             if (laneForAnchor) {
-              const orderWithout = laneForAnchor.itemOrder.filter((id) => id !== (state.lanePreviewItemId || ''))
-              const displayOrder = [...orderWithout]
-              if (state.lanePreviewLaneId === laneForAnchor.id && state.lanePreviewIndex !== null && state.lanePreviewItemId) {
-                displayOrder.splice(state.lanePreviewIndex, 0, state.lanePreviewItemId)
-              }
-
+              const displayOrder = laneDisplayOrders.get(laneForAnchor.id) ?? laneForAnchor.itemOrder
               const anchorSlotIndex = displayOrder.indexOf(anchorCard.id)
               if (anchorSlotIndex !== -1) {
                 anchorPosition = computeLaneSlotPosition(laneForAnchor, anchorSlotIndex, state.cards, state.decks, displayOrder)
@@ -2258,14 +2354,10 @@ export class SceneManager {
         }
 
         // Check if this card is in a lane — if so, position from lane ordering
-        const laneForCard = cardData.laneId ? state.lanes.find(l => l.id === cardData.laneId) : null;
+        const laneForCard = cardData.laneId ? (laneById.get(cardData.laneId) ?? null) : null;
         if (laneForCard) {
           // Position from lane slot
-          const orderWithout = laneForCard.itemOrder.filter(id => id !== (state.lanePreviewItemId || ''));
-          const displayOrder = [...orderWithout];
-          if (state.lanePreviewLaneId === laneForCard.id && state.lanePreviewIndex !== null && state.lanePreviewItemId) {
-            displayOrder.splice(state.lanePreviewIndex, 0, state.lanePreviewItemId);
-          }
+          const displayOrder = laneDisplayOrders.get(laneForCard.id) ?? laneForCard.itemOrder;
           const slotIndex = displayOrder.indexOf(cardData.id);
           const slotPos = computeLaneSlotPosition(laneForCard, slotIndex, state.cards, state.decks, displayOrder);
            
@@ -2278,24 +2370,28 @@ export class SceneManager {
           card3D.targetQuaternion.setFromEuler(getCardTableEuler(cardData, wiggleRot));
           card3D.targetScale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE);
         } else {
-          const regionForCard = cardData.regionId ? state.regions.find((region) => region.id === cardData.regionId) : null;
+          const regionForCard = cardData.regionId ? (regionById.get(cardData.regionId) ?? null) : null;
           const regionPos = regionForCard ? computeRegionCardPosition(regionForCard, cardData.tapped ?? false) : cardData.position;
           card3D.targetPosition.set(regionPos[0], 0.01 + lift, regionPos[2]);
           card3D.targetQuaternion.setFromEuler(getCardTableEuler(cardData, wiggleRot));
           card3D.targetScale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE);
         }
       } else if (inDeck && deck) {
+        const deckTopCardId = getDeckTopCardId(deck)
+        const deckTopCard = deckTopCardId ? cardById.get(deckTopCardId) ?? null : null
+        const displayedDeckCard = {
+          ...cardData,
+          rotation: deck.rotation,
+          faceUp: deckTopCard?.faceUp ?? cardData.faceUp,
+          tapped: deckTopCard?.tapped ?? cardData.tapped,
+        }
         // Check if deck is in a lane
-        const laneForDeck = deck.laneId ? state.lanes.find(l => l.id === deck.laneId) : null;
+        const laneForDeck = deck.laneId ? (laneById.get(deck.laneId) ?? null) : null;
         let deckBaseX = deck.position[0];
         let deckBaseZ = deck.position[2];
         
         if (laneForDeck) {
-          const orderWithout = laneForDeck.itemOrder.filter(id => id !== (state.lanePreviewItemId || ''));
-          const displayOrder = [...orderWithout];
-          if (state.lanePreviewLaneId === laneForDeck.id && state.lanePreviewIndex !== null && state.lanePreviewItemId) {
-            displayOrder.splice(state.lanePreviewIndex, 0, state.lanePreviewItemId);
-          }
+          const displayOrder = laneDisplayOrders.get(laneForDeck.id) ?? laneForDeck.itemOrder;
           let slotIndex = displayOrder.indexOf(deck.id);
           if (slotIndex === -1) slotIndex = 0;
           
@@ -2303,10 +2399,10 @@ export class SceneManager {
           deckBaseX = slotPos[0];
           deckBaseZ = slotPos[2];
         } else if (deck.regionId) {
-          const regionForDeck = state.regions.find((region) => region.id === deck.regionId);
+          const regionForDeck = regionById.get(deck.regionId);
           if (regionForDeck) {
             const topCard = deck.cardIds.length > 0
-              ? state.cards.find((card) => card.id === deck.cardIds[deck.cardIds.length - 1])
+              ? cardById.get(getDeckTopCardId(deck) ?? '') ?? null
               : null;
             const regionPos = computeRegionCardPosition(regionForDeck, topCard?.tapped ?? false);
             deckBaseX = regionPos[0];
@@ -2315,15 +2411,13 @@ export class SceneManager {
         }
         
         const indexInDeck = deck.cardIds.indexOf(cardData.id);
-        const yOffset = 0.01 + lift + indexInDeck * 0.03;
+        const depthIndex = deck.kind === 'sequence'
+          ? deck.cardIds.length - 1 - indexInDeck
+          : indexInDeck;
+        const yOffset = 0.01 + lift + depthIndex * 0.03;
         
         card3D.targetPosition.set(deckBaseX, yOffset, deckBaseZ);
-        card3D.targetQuaternion.setFromEuler(
-          getCardTableEuler(
-            { ...cardData, rotation: deck.rotation },
-            wiggleRot,
-          ),
-        );
+        card3D.targetQuaternion.setFromEuler(getCardTableEuler(displayedDeckCard, wiggleRot));
         card3D.targetScale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE);
       } else if (cardData.location === 'hand') {
         const indexInHand = handIndex;
@@ -2343,10 +2437,12 @@ export class SceneManager {
         card3D.targetScale.set(currentScale, currentScale, currentScale);
       }
     }
+    this.layoutDirty = false
   }
 
   private updateSelectionBounds() {
     const store = useGameStore.getState()
+    this.selectionBoundsDirty = false
     if (store.selectedItems.length === 0) {
       if (store.selectionBounds !== null) {
         store.setSelectionBounds(null)
@@ -2380,35 +2476,76 @@ export class SceneManager {
     }
   }
 
+  private invalidateRender(options?: { layout?: boolean, selectionBounds?: boolean, camera?: boolean }) {
+    if (options?.layout) this.layoutDirty = true
+    if (options?.selectionBounds) this.selectionBoundsDirty = true
+    if (options?.camera) this.cameraDirty = true
+    this.scheduleRender()
+  }
+
+  private scheduleRender() {
+    if (this.isDestroyed || !this.isVisible || this.animationFrameId !== null) return
+    this.animationFrameId = requestAnimationFrame(this.renderFrame)
+  }
+
   private start() {
     this.clock.start();
-    const loop = () => {
-      this.animationFrameId = requestAnimationFrame(loop);
-      this.update();
-      this.renderer.clear();
-      this.renderer.render(this.scene, this.camera);
-      this.renderer.clearDepth();
-      this.renderer.render(this.overlayScene, this.camera);
-    };
-    loop();
+    this.scheduleRender()
+  }
+
+  private renderFrame = () => {
+    this.animationFrameId = null
+    if (this.isDestroyed || !this.isVisible) {
+      return
+    }
+
+    const needsContinuousRender = this.update();
+    this.renderer.clear();
+    this.renderer.render(this.scene, this.camera);
+    this.renderer.clearDepth();
+    this.renderer.render(this.overlayScene, this.camera);
+
+    if (needsContinuousRender || this.layoutDirty || this.selectionBoundsDirty || this.cameraDirty) {
+      this.scheduleRender()
+    }
   }
 
   private update() {
     const delta = this.clock.getDelta();
     // Use capped delta to avoid huge jumps on tab switch
     const safeDelta = Math.min(delta, 0.1);
+    let hasActiveAnimations = false
     
     // Smooth camera zoom
+    const cameraDistanceBefore = this.camera.position.distanceToSquared(this.targetCameraPos)
     this.camera.position.lerp(this.targetCameraPos, 10 * safeDelta);
     this.camera.lookAt(0, 0, 0);
+    const cameraMoving = cameraDistanceBefore > 0.0001 || this.camera.position.distanceToSquared(this.targetCameraPos) > 0.0001
+    if (cameraMoving) {
+      this.cameraDirty = false
+      this.layoutDirty = true
+      this.selectionBoundsDirty = true
+      hasActiveAnimations = true
+    } else {
+      this.cameraDirty = false
+    }
 
-    // Keep hand layout attached to moving camera
-    this.updateLayout(useGameStore.getState());
-    this.updateSelectionBounds()
+    if (this.hoveredTargetId || this.hoveredTargetType) {
+      this.layoutDirty = true
+      hasActiveAnimations = true
+    }
+
+    if (this.layoutDirty) {
+      this.updateLayout(useGameStore.getState());
+      this.selectionBoundsDirty = true
+    }
 
     // Update all cards and their layout
     for (const card of this.cards.values()) {
-      card.update(safeDelta);
+      if (card.update(safeDelta)) {
+        hasActiveAnimations = true
+        this.selectionBoundsDirty = true
+      }
     }
     
     // Update lane animations
@@ -2420,13 +2557,28 @@ export class SceneManager {
     for (const region of this.regions.values()) {
       region.update(safeDelta);
     }
+
+    const selectionSignature = useGameStore.getState().selectedItems.map((item) => `${item.kind}:${item.id}`).join('|')
+    if (selectionSignature !== this.lastSelectionSignature) {
+      this.lastSelectionSignature = selectionSignature
+      this.selectionBoundsDirty = true
+    }
+    if (this.selectionBoundsDirty) {
+      this.updateSelectionBounds()
+    }
+    return hasActiveAnimations;
   }
 
   destroy() {
+    if (this.isDestroyed) return
+    this.isDestroyed = true
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);
     }
+    this.storeUnsubscribe?.()
+    this.storeUnsubscribe = null
     window.removeEventListener('resize', this.onWindowResize);
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
     this.renderer.domElement.removeEventListener('pointermove', this.onPointerMove);
     this.renderer.domElement.removeEventListener('pointerdown', this.onPointerDown);
     this.renderer.domElement.removeEventListener('pointerup', this.onPointerUp);
@@ -2434,6 +2586,11 @@ export class SceneManager {
     
     this.renderer.domElement.remove();
     this.renderer.dispose();
+
+    for (const card of this.cards.values()) {
+      card.dispose()
+    }
+    this.cards.clear()
     
     // Cleanup lanes
     for (const lane of this.lanes.values()) {

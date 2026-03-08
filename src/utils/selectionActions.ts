@@ -43,10 +43,21 @@ function getSingleAttachmentGroupId(cards: GameState['cards']): string | null {
 }
 
 function canAttachCards(cards: GameState['cards']) {
-  return cards.length > 1 && cards.every((card) => (
+  if (cards.length < 2) return false
+
+  const existingGroupIds = new Set(
+    cards
+      .map((card) => card.attachmentGroupId)
+      .filter((groupId): groupId is string => Boolean(groupId)),
+  )
+  if (existingGroupIds.size > 1) return false
+
+  const looseCards = cards.filter((card) => !card.attachmentGroupId)
+  if (existingGroupIds.size === 1 && looseCards.length === 0) return false
+
+  return cards.every((card) => (
     card.location === 'table'
     && !card.regionId
-    && !card.attachmentGroupId
   ))
 }
 
@@ -133,7 +144,7 @@ export function getSelectionActionSet(
   const selectedCards = getSelectedCards(state, selectedCardIds)
   const selectedAttachmentGroupId = getSingleAttachmentGroupId(selectedCards)
   const canAttachSelection = selectedDeckIds.length === 0 && canAttachCards(selectedCards)
-  const { flipCards, tapCards, flipStack, tapDeck, shuffleDeck, attachCards, detachAttachmentGroup, createStackFromCards, combineSelectionIntoStack, setPreviewCard, openDeckExamine } = state
+  const { flipCards, tapCards, flipStack, tapDeck, shuffleDeck, nextSequence, previousSequence, attachCards, detachAttachmentGroup, createStackFromCards, combineSelectionIntoStack, setPreviewCard, openDeckExamine } = state
 
   const actions: SelectionAction[] = []
 
@@ -142,12 +153,26 @@ export function getSelectionActionSet(
   }
 
   if (selectedDeckIds.length === 1 && selectedCardIds.length === 0) {
+    const selectedDeck = state.decks.find((entry) => entry.id === selectedDeckIds[0])
+    if (!selectedDeck) {
+      return { orderedItems, selectedCardIds, selectedDeckIds, actions }
+    }
+
     actions.push(
-      { id: 'flip-stack', label: 'Flip', execute: () => flipStack(selectedDeckIds[0]) },
-      { id: 'tap-stack', label: 'Tap', execute: () => tapDeck(selectedDeckIds[0]) },
-      { id: 'shuffle-stack', label: 'Shuffle', execute: () => shuffleDeck(selectedDeckIds[0]) },
-      { id: 'examine-stack', label: 'Examine', execute: () => openDeckExamine(selectedDeckIds[0]) },
+      { id: 'flip-stack', label: 'Flip', execute: () => flipStack(selectedDeck.id) },
+      { id: 'tap-stack', label: 'Tap', execute: () => tapDeck(selectedDeck.id) },
+      { id: 'examine-stack', label: 'Examine', execute: () => openDeckExamine(selectedDeck.id) },
     )
+    if (selectedDeck.kind === 'sequence') {
+      actions.push(
+        { id: 'previous-sequence', label: 'Previous', execute: () => previousSequence(selectedDeck.id) },
+        { id: 'next-sequence', label: 'Next', execute: () => nextSequence(selectedDeck.id) },
+      )
+    } else {
+      actions.push(
+        { id: 'shuffle-stack', label: 'Shuffle', execute: () => shuffleDeck(selectedDeck.id) },
+      )
+    }
     actions.push(...getRegionContextualActions(state, actionItems))
     return { orderedItems, selectedCardIds, selectedDeckIds, actions }
   }
@@ -186,6 +211,7 @@ export function getSelectionActionSet(
   }
 
   if (selectedDeckIds.length > 1 || (selectedDeckIds.length > 0 && selectedCardIds.length > 0)) {
+    const includesSequence = selectedDeckIds.some((deckId) => state.decks.find((deck) => deck.id === deckId)?.kind === 'sequence')
     actions.push(
       {
         id: 'tap-mixed',
@@ -197,16 +223,18 @@ export function getSelectionActionSet(
           selectedDeckIds.forEach((deckId) => tapDeck(deckId))
         },
       },
-      {
-        id: 'combine',
-        label: 'Combine',
-        execute: () => {
-          combineSelectionIntoStack(
-            { cardIds: selectedCardIds, deckIds: selectedDeckIds, orderedItems: actionItems },
-            targetContext,
-          )
-        },
-      },
+      ...(!includesSequence
+        ? [{
+            id: 'combine',
+            label: 'Combine',
+            execute: () => {
+              combineSelectionIntoStack(
+                { cardIds: selectedCardIds, deckIds: selectedDeckIds, orderedItems: actionItems },
+                targetContext,
+              )
+            },
+          } satisfies SelectionAction]
+        : []),
     )
   }
 
@@ -247,6 +275,12 @@ export function executeTapShortcut() {
   }
 
   if (state.hoveredCardId) {
+    const hoveredDeck = state.decks.find((deck) => deck.cardIds.includes(state.hoveredCardId!))
+    if (hoveredDeck?.kind === 'sequence') {
+      state.tapDeck(hoveredDeck.id)
+      return
+    }
+
     state.tapCard(state.hoveredCardId)
     return
   }

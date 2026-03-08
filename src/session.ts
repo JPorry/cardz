@@ -1,9 +1,9 @@
 import { INITIAL_LANES, INITIAL_REGIONS } from './utils/boardUtils'
-import type { CardLocation, CardState, DeckState, ExaminedStackState, GameState, LaneState, RegionState } from './store'
+import type { CardLocation, CardState, DeckKind, DeckState, ExaminedStackState, GameState, LaneState, RegionState } from './store'
 import type { TitlePosition } from './utils/areaLayout'
 import { normalizeCardCounters, normalizeCardStatuses } from './utils/cardMetadata'
 
-export const GAME_SESSION_VERSION = 3
+export const GAME_SESSION_VERSION = 4
 export const GAME_SESSION_STORAGE_KEY = `marvel-champions-session-v${GAME_SESSION_VERSION}`
 
 export interface SerializedGameSessionState {
@@ -117,6 +117,16 @@ function parseCardLocation(value: unknown): CardLocation {
   throw new Error('Invalid card location.')
 }
 
+function parseDeckKind(value: unknown): DeckKind {
+  if (value === undefined || value === null) {
+    return 'stack'
+  }
+  if (value === 'stack' || value === 'sequence') {
+    return value
+  }
+  throw new Error('Invalid deck kind.')
+}
+
 function parseTitlePosition(value: unknown): TitlePosition {
   if (value === 'top' || value === 'bottom' || value === 'left' || value === 'right') {
     return value
@@ -183,6 +193,7 @@ function parseDeckState(value: unknown): DeckState {
 
   return {
     id: value.id,
+    kind: parseDeckKind(value.kind),
     position: parseTuple3(value.position, `deck ${value.id} position`),
     rotation: parseTuple3(value.rotation, `deck ${value.id} rotation`),
     cardIds: parseStringArray(value.cardIds, `deck ${value.id} cardIds`),
@@ -254,6 +265,10 @@ function parseExaminedStackState(value: unknown): ExaminedStackState | null {
     deckId: value.deckId,
     cardOrder: parseStringArray(value.cardOrder, 'examinedStack.cardOrder'),
     originalCardOrder: parseStringArray(value.originalCardOrder, 'examinedStack.originalCardOrder'),
+    originalFaceUpCardIds: parseStringArray(
+      value.originalFaceUpCardIds ?? [],
+      'examinedStack.originalFaceUpCardIds',
+    ),
     hiddenDeck: value.hiddenDeck === undefined ? true : Boolean(value.hiddenDeck),
   }
 }
@@ -299,20 +314,38 @@ function cloneExaminedStack(examinedStack: ExaminedStackState | null): ExaminedS
     ...examinedStack,
     cardOrder: [...examinedStack.cardOrder],
     originalCardOrder: [...examinedStack.originalCardOrder],
+    originalFaceUpCardIds: [...examinedStack.originalFaceUpCardIds],
   }
 }
 
-function applyConfiguredLaneTitlePosition(lane: LaneState): LaneState {
+function applyConfiguredLaneConfiguration(lane: LaneState): LaneState {
   const configuredLane = INITIAL_LANES.find((entry) => entry.id === lane.id)
   return configuredLane
-    ? { ...lane, titlePosition: configuredLane.titlePosition }
+    ? {
+      ...lane,
+      label: configuredLane.label,
+      titlePosition: configuredLane.titlePosition,
+      position: [...configuredLane.position],
+      width: configuredLane.width,
+      depth: configuredLane.depth,
+      flipped: configuredLane.flipped,
+      cardSpacing: configuredLane.cardSpacing,
+    }
     : lane
 }
 
-function applyConfiguredRegionTitlePosition(region: RegionState): RegionState {
+function applyConfiguredRegionConfiguration(region: RegionState): RegionState {
   const configuredRegion = INITIAL_REGIONS.find((entry) => entry.id === region.id)
   return configuredRegion
-    ? { ...region, titlePosition: configuredRegion.titlePosition }
+    ? {
+      ...region,
+      label: configuredRegion.label,
+      titlePosition: configuredRegion.titlePosition,
+      position: [...configuredRegion.position],
+      width: configuredRegion.width,
+      depth: configuredRegion.depth,
+      flipped: configuredRegion.flipped,
+    }
     : region
 }
 
@@ -378,7 +411,7 @@ export function parseSerializedGameSession(value: unknown): SerializedGameSessio
     throw new Error('Invalid session payload.')
   }
 
-  if (value.version !== 1 && value.version !== GAME_SESSION_VERSION) {
+  if (value.version !== 1 && value.version !== 3 && value.version !== GAME_SESSION_VERSION) {
     throw new Error(`Unsupported session version: ${String(value.version)}`)
   }
 
@@ -419,8 +452,8 @@ export function createImportedGameState(session: SerializedGameSession): Resetta
     ...resetState,
     cards: session.state.cards.map(cloneCard),
     decks: session.state.decks.map(cloneDeck),
-    lanes: session.state.lanes.map(cloneLane).map(applyConfiguredLaneTitlePosition),
-    regions: session.state.regions.map(cloneRegion).map(applyConfiguredRegionTitlePosition),
+    lanes: session.state.lanes.map(cloneLane).map(applyConfiguredLaneConfiguration),
+    regions: session.state.regions.map(cloneRegion).map(applyConfiguredRegionConfiguration),
     examinedStack: cloneExaminedStack(session.state.examinedStack),
   }
 }

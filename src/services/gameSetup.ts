@@ -295,21 +295,21 @@ export async function prepareGameSetup(selection: GameSetupSelection): Promise<P
       .filter((card) => card.typeCode === 'villain' && ![currentVillainStage, hiddenVillainStage].includes(card.stage ?? -1))
       .map((card) => card.id),
   )
-  const mainSchemeStackCards = [...encounterCards.filter((card) => card.typeCode === 'main_scheme')]
-    .sort((left, right) => (right.stage ?? 0) - (left.stage ?? 0))
+  const mainSchemeSequenceCards = [...encounterCards.filter((card) => card.typeCode === 'main_scheme')]
+    .sort((left, right) => (left.stage ?? 0) - (right.stage ?? 0))
   const villainPermanentCards = encounterCards.filter((card) => (
     card.cardSetCode === selection.villain.card_set_code && hasPermanentKeyword(card)
   ))
-  const villainAreaCards = [
-    { ...hiddenVillainCard, faceUp: false },
+  const villainSequenceCards = [
     { ...currentVillainCard, faceUp: true },
-    ...villainPermanentCards.map((card) => ({ ...card, faceUp: true })),
+    { ...hiddenVillainCard, faceUp: false },
   ]
+  const villainAreaCards = villainPermanentCards.map((card) => ({ ...card, faceUp: true }))
 
   const placedEncounterIds = new Set([
     hiddenVillainCard.id,
     currentVillainCard.id,
-    ...mainSchemeStackCards.map((card) => card.id),
+    ...mainSchemeSequenceCards.map((card) => card.id),
     ...villainPermanentCards.map((card) => card.id),
     ...discardedVillainStageIds,
   ])
@@ -321,8 +321,9 @@ export async function prepareGameSetup(selection: GameSetupSelection): Promise<P
     playerDeckCards,
     playerAreaCards,
     villainDeckCards,
+    villainSequenceCards,
     villainAreaCards,
-    mainSchemeStackCards,
+    mainSchemeSequenceCards,
     nemesisDeckCards: nemesisCards,
     selection: {
       heroName: selection.hero.name,
