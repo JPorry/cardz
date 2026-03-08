@@ -42,6 +42,7 @@ export class Card3D {
   currentBackArtworkUrl?: string;
   currentArtworkRotation: number = 0;
   currentBackArtworkRotation: number = 0;
+  isOverlayRendering: boolean = false;
 
   constructor(cardData: CardState) {
     this.id = cardData.id;
@@ -106,6 +107,9 @@ export class Card3D {
 
   private setupMeshes() {
     const cardShape = this.createRoundedRectShape(CARD_WIDTH, CARD_HEIGHT, 0.1);
+    const borderShape = this.createRoundedRectShape(CARD_WIDTH, CARD_HEIGHT, 0.1);
+    const innerBorderHole = this.createRoundedRectShape(CARD_WIDTH * 0.965, CARD_HEIGHT * 0.965, 0.08);
+    borderShape.holes.push(innerBorderHole);
     
     // Main extruded body
     const extrudeSettings = {
@@ -129,6 +133,28 @@ export class Card3D {
     centerMesh.receiveShadow = true;
     centerMesh.userData.renderOrderOffset = 0;
     this.group.add(centerMesh);
+
+    const borderGeometry = new THREE.ShapeGeometry(borderShape);
+    const borderMaterial = new THREE.MeshBasicMaterial({
+      color: 0x17191f,
+      transparent: false,
+      opacity: 1,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -3,
+      polygonOffsetUnits: -3,
+    });
+
+    const frontBorderMesh = new THREE.Mesh(borderGeometry, borderMaterial);
+    frontBorderMesh.position.set(0, 0, CARD_THICKNESS / 2 + 0.003);
+    frontBorderMesh.userData.renderOrderOffset = -1;
+    this.group.add(frontBorderMesh);
+
+    const backBorderMesh = new THREE.Mesh(borderGeometry.clone(), borderMaterial.clone());
+    backBorderMesh.position.set(0, 0, -CARD_THICKNESS / 2 - 0.003);
+    backBorderMesh.rotation.set(0, Math.PI, 0);
+    backBorderMesh.userData.renderOrderOffset = -1;
+    this.group.add(backBorderMesh);
 
     // Front face
     const faceShape = this.createRoundedRectShape(CARD_WIDTH * 0.95, CARD_HEIGHT * 0.95, 0.08);
@@ -578,6 +604,10 @@ export class Card3D {
       const renderOrderOffset = object.userData.renderOrderOffset ?? 0;
       object.renderOrder = order + renderOrderOffset;
     });
+  }
+
+  setOverlayRendering(enabled: boolean) {
+    this.isOverlayRendering = enabled
   }
 
   update(delta: number) {

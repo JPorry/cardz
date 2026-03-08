@@ -4,6 +4,7 @@ import { Card3D } from './Card3D';
 import { Table3D } from './Table3D';
 import { Lane3D } from './Lane3D';
 import { Region3D } from './Region3D';
+import { ExamineStrip3D } from './ExamineStrip3D';
 import { getCardBackUrl } from '../services/marvelCdb';
 import { getCardTableEuler, TABLE_CARD_SCALE } from '../utils/cardOrientation';
 import { BOARD_CONFIG } from '../config/board';
@@ -22,6 +23,10 @@ type DraggedCardOrigin = {
   card: Pick<CardState, 'location' | 'position' | 'rotation' | 'faceUp' | 'laneId' | 'regionId'>;
   sourceDeck?: Pick<DeckState, 'id' | 'position' | 'rotation' | 'cardIds' | 'laneId' | 'regionId'> & {
     laneIndex?: number;
+  };
+  examinedStack?: {
+    deckId: string;
+    index: number;
   };
 };
 
@@ -55,12 +60,14 @@ type SelectionDropUnit =
 export class SceneManager {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
+  overlayScene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   
   table: Table3D;
   cards: Map<string, Card3D> = new Map();
   lanes: Map<string, Lane3D> = new Map();
   regions: Map<string, Region3D> = new Map();
+  examineStrip: ExamineStrip3D;
   
   raycaster: THREE.Raycaster;
   pointer: THREE.Vector2 = new THREE.Vector2(-10, -10);
@@ -91,6 +98,7 @@ export class SceneManager {
   dragSelectionEntries: DragSelectionEntry[] = [];
   dragOrigins: DragOrigin[] = [];
   lastSelectionBoundsKey: string | null = null;
+  previousExaminedCardIds: Set<string> = new Set();
 
   animationFrameId: number | null = null;
   clock: THREE.Clock = new THREE.Clock();
@@ -104,6 +112,7 @@ export class SceneManager {
 
   constructor(container: HTMLDivElement) {
     this.scene = new THREE.Scene();
+    this.overlayScene = new THREE.Scene();
     
     // Setup Camera (matches old Canvas setup)
     this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -116,6 +125,7 @@ export class SceneManager {
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.autoClear = false;
     // Fix sRGB output encoding (default in R3F)
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(this.renderer.domElement);
@@ -126,28 +136,15 @@ export class SceneManager {
     this.scene.background = new THREE.Color(0x252a36);
     
     // Lights (adjusted to make shadows more transparent and softer)
-    const ambientLight = new THREE.AmbientLight(0xffffff, Math.PI * 0.8); // Brighter ambient fills the shadow
-    this.scene.add(ambientLight);
-
-    const dirLight = new THREE.DirectionalLight(0xffffff, Math.PI * 0.5); // Softer directional light
-    dirLight.position.set(10, 10, 10);
-    dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 1024;
-    dirLight.shadow.mapSize.height = 1024;
-    dirLight.shadow.camera.near = 0.5;
-    dirLight.shadow.camera.far = 50;
-    dirLight.shadow.camera.left = -20;
-    dirLight.shadow.camera.right = 20;
-    dirLight.shadow.camera.top = 20;
-    dirLight.shadow.camera.bottom = -20;
-    dirLight.shadow.bias = -0.001;
-    // Add radius for a much more blurred PCFSoftShadowMap effect
-    dirLight.shadow.radius = 8;
-    this.scene.add(dirLight);
+    this.addSceneLights(this.scene);
+    this.addSceneLights(this.overlayScene);
 
     // Table
     this.table = new Table3D();
     this.scene.add(this.table.mesh);
+    this.examineStrip = new ExamineStrip3D();
+    this.examineStrip.group.visible = false;
+    this.overlayScene.add(this.examineStrip.group);
 
     // Initial load from store
     const storeState = useGameStore.getState();
@@ -198,6 +195,26 @@ export class SceneManager {
     this.targetCameraPos.copy(this.baseCameraPos).multiplyScalar(this.currentZoom);
   }
 
+  private addSceneLights(targetScene: THREE.Scene) {
+    const ambientLight = new THREE.AmbientLight(0xffffff, Math.PI * 0.8)
+    targetScene.add(ambientLight)
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, Math.PI * 0.5)
+    dirLight.position.set(10, 10, 10)
+    dirLight.castShadow = targetScene === this.scene
+    dirLight.shadow.mapSize.width = 1024
+    dirLight.shadow.mapSize.height = 1024
+    dirLight.shadow.camera.near = 0.5
+    dirLight.shadow.camera.far = 50
+    dirLight.shadow.camera.left = -20
+    dirLight.shadow.camera.right = 20
+    dirLight.shadow.camera.top = 20
+    dirLight.shadow.camera.bottom = -20
+    dirLight.shadow.bias = -0.001
+    dirLight.shadow.radius = 8
+    targetScene.add(dirLight)
+  }
+
   private getPointerCoordsFromClient(clientX: number, clientY: number): THREE.Vector2 {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const x = ((clientX - rect.left) / rect.width) * 2 - 1;
@@ -227,6 +244,10 @@ export class SceneManager {
     const store = useGameStore.getState()
     const card = store.cards.find((entry) => entry.id === cardId)
     if (!card || (card.location !== 'table' && card.location !== 'deck')) return []
+
+    if (this.isCardInExaminedStack(cardId)) {
+      return [{ id: card.id, kind: 'card' }]
+    }
 
     if (card.location === 'deck') {
       const deck = store.decks.find((entry) => entry.cardIds.includes(cardId))
@@ -277,6 +298,80 @@ export class SceneManager {
     return topCard?.faceUp ? topCardId : null
   }
 
+  private getExaminedStack() {
+    return useGameStore.getState().examinedStack
+  }
+
+  private isCardInExaminedStack(cardId: string) {
+    return this.getExaminedStack()?.cardOrder.includes(cardId) ?? false
+  }
+
+  private getExaminedCardIndex(cardId: string) {
+    return this.getExaminedStack()?.cardOrder.indexOf(cardId) ?? -1
+  }
+
+  private getExaminedCardPosition(cardId: string): [number, number, number] | null {
+    const examinedStack = this.getExaminedStack()
+    if (!examinedStack) return null
+
+    const cardIndex = examinedStack.cardOrder.indexOf(cardId)
+    if (cardIndex === -1) return null
+
+    const stripWidth = this.examineStrip.width - 2.8
+    const totalCards = examinedStack.cardOrder.length
+    const maxSpread = Math.max(0, stripWidth - 2.4)
+    const spacing = totalCards > 1
+      ? Math.min(2.38, Math.max(0.48, maxSpread / (totalCards - 1)))
+      : 0
+    const startX = this.examineStrip.group.position.x - ((totalCards - 1) * spacing) / 2
+    const x = startX + cardIndex * spacing
+    const z = this.examineStrip.group.position.z + 0.9
+    const y = this.examineStrip.group.position.y + 0.28 + cardIndex * 0.005
+    return [x, y, z]
+  }
+
+  private getExaminedInsertIndex(worldX: number, draggedCardId: string) {
+    const examinedStack = this.getExaminedStack()
+    if (!examinedStack) return 0
+
+    const orderWithoutDragged = examinedStack.cardOrder.filter((cardId) => cardId !== draggedCardId)
+    if (orderWithoutDragged.length === 0) return 0
+
+    const cardCenters = orderWithoutDragged
+      .map((cardId) => this.getExaminedCardPosition(cardId)?.[0])
+      .filter((value): value is number => value !== undefined)
+
+    if (cardCenters.length === 0) return 0
+    if (worldX <= cardCenters[0]) return 0
+
+    for (let index = 0; index < cardCenters.length - 1; index += 1) {
+      const midpoint = (cardCenters[index] + cardCenters[index + 1]) / 2
+      if (worldX < midpoint) {
+        return index + 1
+      }
+    }
+
+    return cardCenters.length
+  }
+
+  private setCardSceneMembership(cardId: string, useOverlayScene: boolean) {
+    const card3D = this.cards.get(cardId)
+    if (!card3D) return
+
+    const targetScene = useOverlayScene ? this.overlayScene : this.scene
+    const otherScene = useOverlayScene ? this.scene : this.overlayScene
+
+    if (card3D.group.parent !== targetScene) {
+      otherScene.remove(card3D.group)
+      targetScene.add(card3D.group)
+    }
+
+    if (card3D.ghostGroup.parent !== targetScene) {
+      otherScene.remove(card3D.ghostGroup)
+      targetScene.add(card3D.ghostGroup)
+    }
+  }
+
   private getHoveredShortcutCard(cardId: string): CardState | null {
     const store = useGameStore.getState()
     const card = store.cards.find((entry) => entry.id === cardId)
@@ -288,6 +383,10 @@ export class SceneManager {
     }
 
     if (card.location === 'table') {
+      return card
+    }
+
+    if (this.isCardInExaminedStack(cardId)) {
       return card
     }
 
@@ -416,8 +515,11 @@ export class SceneManager {
         const cardModel = store.cards.find(c => c.id === this.activeDragCardId);
         const isFromHand = cardModel?.location === 'hand';
         if (cardModel) {
-          const dragCardModel = isFromHand ? { ...cardModel, location: 'table' as const, faceUp: true } : cardModel
-          const dragEuler = getCardTableEuler(dragCardModel, 0, 0.3)
+          const isFromExamineStrip = this.isCardInExaminedStack(cardModel.id)
+          const dragCardModel = isFromHand
+            ? { ...cardModel, location: 'table' as const, faceUp: true }
+            : cardModel
+          const dragEuler = getCardTableEuler(dragCardModel, 0, isFromExamineStrip ? 0 : 0.3)
           card3D.group.rotation.set(dragEuler.x, dragEuler.y, dragEuler.z)
         }
 
@@ -426,6 +528,28 @@ export class SceneManager {
         const dropInHand = this.pointer.y < HAND_DROP_THRESHOLD;
         if (!dropInHand) {
           this.clearHandPreview();
+
+          const draggingExaminedCard = Boolean(this.draggedCardOrigin?.examinedStack)
+          if (draggingExaminedCard && this.examineStrip.group.visible && this.examineStrip.containsPoint(tableHit.x, tableHit.z)) {
+            const liftedY = this.examineStrip.group.position.y + 0.62
+            const lockedZ = this.examineStrip.group.position.z + 0.9
+            card3D.group.position.set(hit.x, liftedY, lockedZ)
+            card3D.setRenderOrder(13000)
+
+            const fromIndex = this.getExaminedCardIndex(this.activeDragCardId!)
+            const toIndex = this.getExaminedInsertIndex(hit.x, this.activeDragCardId!)
+            if (fromIndex !== -1 && toIndex !== fromIndex) {
+              store.reorderExaminedStack(fromIndex, toIndex)
+            }
+
+            this.hoveredTargetId = null;
+            this.hoveredTargetType = null;
+            this.clearLaneHover();
+            this.clearRegionHover();
+            card3D.setGhostOpacity(0);
+            return
+          }
+
           const target = this.findDropTarget(tableHit.x, tableHit.z, [this.activeDragCardId!]);
 
           this.updateLaneHover(tableHit.x, tableHit.z, this.activeDragCardId!);
@@ -512,6 +636,21 @@ export class SceneManager {
 
     this.pointer.copy(this.getPointerCoords(e));
     this.raycaster.setFromCamera(this.pointer, this.camera);
+
+    if (this.examineStrip.group.visible) {
+      const buttonIntersections = this.raycaster.intersectObjects(this.examineStrip.getButtonMeshes(), true)
+      if (buttonIntersections.length > 0) {
+        const button = buttonIntersections[0]?.object.userData?.examineButton as 'keep' | 'shuffle' | undefined
+        if (button === 'keep') {
+          useGameStore.getState().closeExaminedStackAndKeepOrder()
+          return
+        }
+        if (button === 'shuffle') {
+          useGameStore.getState().closeExaminedStackAndShuffle()
+          return
+        }
+      }
+    }
     
     // Check intersection with cards
     const cardGroups = Array.from(this.cards.values()).map(c => c.group);
@@ -736,11 +875,20 @@ export class SceneManager {
 	    } else if (this.activeDragCardId) {
 	       const dropInHand = this.pointer.y < HAND_DROP_THRESHOLD;
 	       const dropTarget = this.findDropTarget(this.lastDragPos.x, this.lastDragPos.z, [this.activeDragCardId]);
+         const draggingExaminedCard = Boolean(this.draggedCardOrigin?.examinedStack)
+         const releasedInExamineStrip = draggingExaminedCard
+           && this.examineStrip.group.visible
+           && this.examineStrip.containsPoint(this.lastDragPos.x, this.lastDragPos.z)
 
-	       if (!dropInHand) {
+	       if (!dropInHand && !releasedInExamineStrip) {
           this.clearHandPreview();
           const lane = this.findLaneAtPosition(this.lastDragPos.x, this.lastDragPos.z);
           const region = this.findRegionAtPosition(this.lastDragPos.x, this.lastDragPos.z);
+          const hasConcreteTarget = Boolean(lane || dropTarget || region || BOARD_CONFIG.allowDirectTableCardDrop !== false)
+
+          if (draggingExaminedCard && hasConcreteTarget) {
+            store.removeCardFromExaminedStack(this.activeDragCardId)
+          }
           
           if (lane) {
              const laneData = store.lanes.find(l => l.id === lane.id);
@@ -778,7 +926,12 @@ export class SceneManager {
 	               store.moveCard(this.activeDragCardId, 'table', [this.lastDragPos.x, 0, this.lastDragPos.z], [0, 0, 0]);
 	             }
           }
+       } else if (releasedInExamineStrip) {
+          this.clearHandPreview();
        } else {
+           if (draggingExaminedCard) {
+             store.removeCardFromExaminedStack(this.activeDragCardId);
+           }
            const c = store.cards.find(c => c.id === this.activeDragCardId);
            if (c?.location === 'hand') {
              if (store.handPreviewIndex !== null && store.handPreviewItemId === c.id) {
@@ -831,6 +984,10 @@ export class SceneManager {
 	    this.isFullDeckDrag = false;
       this.draggedCardOrigin = null;
 	    store.setDragging(false, null);
+
+      // Some drop flows update card placement while the card is still marked as dragging,
+      // so run one final sync against the settled state to apply the new layout immediately.
+      this.sync(useGameStore.getState());
 	  }
 
   private beginSelectionDrag(anchorItem: SelectionItem, forcedItems?: SelectionItem[]) {
@@ -898,6 +1055,21 @@ export class SceneManager {
     this.isPendingMarquee = false
     this.isGroupDrag = false
 
+    if (this.isCardInExaminedStack(cardId)) {
+      this.rememberDraggedCardOrigin(cardModel)
+      this.activeDragCardId = cardId
+      this.activeDragDeckId = null
+      this.isFullDeckDrag = false
+
+      const card3D = this.cards.get(cardId)
+      if (card3D) {
+        card3D.isDragging = true
+      }
+
+      store.setDragging(true, 'card', cardId)
+      return
+    }
+
     if (cardModel.location === 'deck') {
       const sourceDeck = store.decks.find((deck) => deck.cardIds.includes(cardId))
       if (!sourceDeck) return
@@ -933,8 +1105,12 @@ export class SceneManager {
   private getRenderableSelectionItem(item: SelectionItem) {
     const store = useGameStore.getState()
     if (item.kind === 'card') {
-      return store.cards.find((card) => card.id === item.id && card.location === 'table')
+      return store.cards.find((card) => (
+        card.id === item.id
+        && (card.location === 'table' || this.isCardInExaminedStack(card.id))
+      ))
     }
+    if (this.getExaminedStack()?.deckId === item.id) return null
     return store.decks.find((deck) => deck.id === item.id)
   }
 
@@ -971,6 +1147,8 @@ export class SceneManager {
   private getSelectionItemPosition(item: SelectionItem): [number, number, number] | null {
     const store = useGameStore.getState()
     if (item.kind === 'card') {
+      const examinedPosition = this.getExaminedCardPosition(item.id)
+      if (examinedPosition) return examinedPosition
       const card = store.cards.find((entry) => entry.id === item.id)
       if (!card) return null
       const card3D = this.cards.get(item.id)
@@ -979,6 +1157,7 @@ export class SceneManager {
         : [...card.position] as [number, number, number]
     }
 
+    if (this.getExaminedStack()?.deckId === item.id) return null
     const deck = store.decks.find((entry) => entry.id === item.id)
     return deck ? [...deck.position] as [number, number, number] : null
   }
@@ -1197,8 +1376,12 @@ export class SceneManager {
   private getSelectableItems(): SelectionItem[] {
     const store = useGameStore.getState()
     return [
-      ...store.cards.filter((card) => card.location === 'table').map((card) => ({ id: card.id, kind: 'card' as const })),
-      ...store.decks.map((deck) => ({ id: deck.id, kind: 'deck' as const })),
+      ...store.cards
+        .filter((card) => card.location === 'table' || this.isCardInExaminedStack(card.id))
+        .map((card) => ({ id: card.id, kind: 'card' as const })),
+      ...store.decks
+        .filter((deck) => deck.id !== store.examinedStack?.deckId)
+        .map((deck) => ({ id: deck.id, kind: 'deck' as const })),
     ]
   }
 
@@ -1603,6 +1786,8 @@ export class SceneManager {
   }
 
   private rememberDraggedCardOrigin(card: CardState, sourceDeck?: DeckState) {
+    const examinedIndex = this.getExaminedCardIndex(card.id)
+    const examinedStack = examinedIndex >= 0 ? this.getExaminedStack() : null
     this.draggedCardOrigin = {
       cardId: card.id,
       card: {
@@ -1622,12 +1807,22 @@ export class SceneManager {
         regionId: sourceDeck.regionId,
         laneIndex: sourceDeck.laneId ? useGameStore.getState().lanes.find((lane) => lane.id === sourceDeck.laneId)?.itemOrder.indexOf(sourceDeck.id) : undefined,
       } : undefined,
+      examinedStack: examinedStack
+        ? {
+            deckId: examinedStack.deckId,
+            index: examinedIndex,
+          }
+        : undefined,
     };
   }
 
   private restoreDraggedCardOrigin() {
     const origin = this.draggedCardOrigin;
     if (!origin) return;
+
+    if (origin.examinedStack) {
+      return;
+    }
 
     if (origin.card.location === 'deck' && origin.sourceDeck) {
       const sourceDeck = origin.sourceDeck;
@@ -1703,6 +1898,7 @@ export class SceneManager {
     
     // Check Decks first
     for (const deck of store.decks) {
+      if (deck.id === store.examinedStack?.deckId) continue;
       if (ignoreIds.includes(deck.id)) continue;
       const dx = deck.position[0] - x;
       const dz = deck.position[2] - z;
@@ -1872,11 +2068,16 @@ export class SceneManager {
   }
 
   private sync(state: GameState) {
+    const nextExaminedCardIds = new Set(state.examinedStack?.cardOrder ?? [])
+    const newlyExaminedCardIds = [...nextExaminedCardIds].filter((cardId) => !this.previousExaminedCardIds.has(cardId))
+
     const nextCardIds = new Set(state.cards.map((card) => card.id))
     for (const [cardId, card3D] of this.cards) {
       if (nextCardIds.has(cardId)) continue
       this.scene.remove(card3D.group)
       this.scene.remove(card3D.ghostGroup)
+      this.overlayScene.remove(card3D.group)
+      this.overlayScene.remove(card3D.ghostGroup)
       this.cards.delete(cardId)
     }
 
@@ -1891,6 +2092,7 @@ export class SceneManager {
       
       const c3d = this.cards.get(data.id);
       if (c3d) {
+        this.setCardSceneMembership(data.id, Boolean(state.examinedStack?.cardOrder.includes(data.id)))
         c3d.refreshArtwork(data.artworkUrl, data.backArtworkUrl ?? getCardBackUrl(data.typeCode));
         const deck = state.decks.find((entry) => entry.cardIds.includes(data.id))
         const showOnTopOfDeck = Boolean(
@@ -1908,7 +2110,19 @@ export class SceneManager {
       }
     }
 
+    this.examineStrip.group.visible = Boolean(state.examinedStack)
+    if (state.examinedStack) {
+      this.examineStrip.updateCardCount(state.examinedStack.cardOrder.length)
+    }
+
     this.updateLayout(state);
+
+    newlyExaminedCardIds.forEach((cardId) => {
+      const card3D = this.cards.get(cardId)
+      card3D?.updateTransform()
+    })
+
+    this.previousExaminedCardIds = nextExaminedCardIds
   }
 
   private updateLayout(state: GameState) {
@@ -1942,7 +2156,11 @@ export class SceneManager {
       if (!card3D) continue;
 
       const inDeck = cardData.location === 'deck';
-      const attachmentRenderOrder = cardData.attachmentGroupId
+      const examinedIndex = this.getExaminedCardIndex(cardData.id)
+      card3D.setOverlayRendering(examinedIndex >= 0)
+      const attachmentRenderOrder = examinedIndex >= 0
+        ? 11000 + examinedIndex
+        : cardData.attachmentGroupId
         ? 40 + (100 - (cardData.attachmentIndex ?? 0))
         : cardData.location === 'hand'
           ? 20
@@ -1969,6 +2187,14 @@ export class SceneManager {
 
       const wiggleRot = isHoveredTarget ? Math.sin(performance.now() * 0.025) * 0.1 : 0;
       const lift = isHoveredTarget ? 0.05 : 0; // slight lift on hover
+
+      const examinedPosition = this.getExaminedCardPosition(cardData.id)
+      if (examinedPosition) {
+        card3D.targetPosition.set(examinedPosition[0], examinedPosition[1] + lift, examinedPosition[2])
+        card3D.targetQuaternion.setFromEuler(getCardTableEuler(cardData, wiggleRot))
+        card3D.targetScale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE)
+        continue
+      }
 
       if (cardData.location === 'table' && !inDeck) {
         if (cardData.attachmentGroupId) {
@@ -2136,7 +2362,10 @@ export class SceneManager {
     const loop = () => {
       this.animationFrameId = requestAnimationFrame(loop);
       this.update();
+      this.renderer.clear();
       this.renderer.render(this.scene, this.camera);
+      this.renderer.clearDepth();
+      this.renderer.render(this.overlayScene, this.camera);
     };
     loop();
   }
@@ -2195,6 +2424,9 @@ export class SceneManager {
     }
     this.regions.clear();
 
+    this.examineStrip.dispose();
+
     this.scene.clear();
+    this.overlayScene.clear();
   }
 }

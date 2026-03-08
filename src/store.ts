@@ -108,7 +108,7 @@ export interface ExaminedStackState {
   deckId: string
   cardOrder: string[]
   originalCardOrder: string[]
-  pendingClosePrompt: boolean
+  hiddenDeck: boolean
 }
 
 export interface LaneState {
@@ -219,8 +219,8 @@ export interface GameState {
   combineSelectionIntoStack: (selection: { cardIds: string[], deckIds: string[], orderedItems?: SelectionItem[] }, targetContext?: StackTargetContext) => string | null
   openDeckExamine: (deckId: string) => void
   closeDeckExamine: () => void
-  setExaminedStackPendingClosePrompt: (pending: boolean) => void
   reorderExaminedStack: (fromIndex: number, toIndex: number) => void
+  removeCardFromExaminedStack: (cardId: string) => number | null
   commitExaminedStackOrder: () => void
   shuffleDeck: (deckId: string) => void
   closeExaminedStackAndKeepOrder: () => void
@@ -237,6 +237,25 @@ const ATTACHMENT_Z_OFFSET = -0.05
 const ATTACHMENT_Y_OFFSET = -0.014
 const DETACH_X_OFFSET = 0.62
 const DETACH_Z_OFFSET = 0.06
+
+function restoreExaminedStackFaceDown(cards: CardState[], examinedStack: ExaminedStackState | null) {
+  if (!examinedStack) return cards
+
+  const remainingCardIds = new Set(examinedStack.cardOrder)
+  return cards.map((card) => (
+    remainingCardIds.has(card.id)
+      ? { ...card, faceUp: false }
+      : card
+  ))
+}
+
+function toExaminedCardOrder(deckCardIds: string[]) {
+  return [...deckCardIds].reverse()
+}
+
+function fromExaminedCardOrder(cardOrder: string[]) {
+  return [...cardOrder].reverse()
+}
 
 function getLaneLeadingReservedWidth(lane: LaneState) {
   return lane.titlePosition === 'left'
@@ -1321,28 +1340,28 @@ export const useGameStore = create<GameState>((set, get) => ({
       const deck = state.decks.find((entry) => entry.id === deckId)
       if (!deck) return state
 
+      const examinedCardOrder = toExaminedCardOrder(deck.cardIds)
+
       return {
+        cards: state.cards.map((card) => (
+          deck.cardIds.includes(card.id)
+            ? { ...card, faceUp: true }
+            : card
+        )),
         examinedStack: {
           deckId,
-          cardOrder: [...deck.cardIds],
-          originalCardOrder: [...deck.cardIds],
-          pendingClosePrompt: false,
+          cardOrder: examinedCardOrder,
+          originalCardOrder: examinedCardOrder,
+          hiddenDeck: true,
         },
-        selectedItems: [{ id: deckId, kind: 'deck' as const }],
+        selectedItems: [],
       }
     }),
-  closeDeckExamine: () => set({ examinedStack: null }),
-  setExaminedStackPendingClosePrompt: (pending) =>
-    set((state) => (
-      state.examinedStack
-        ? {
-            examinedStack: {
-              ...state.examinedStack,
-              pendingClosePrompt: pending,
-            },
-          }
-        : state
-    )),
+  closeDeckExamine: () =>
+    set((state) => ({
+      cards: restoreExaminedStackFaceDown(state.cards, state.examinedStack),
+      examinedStack: null,
+    })),
   reorderExaminedStack: (fromIndex, toIndex) =>
     set((state) => {
       if (!state.examinedStack) return state
@@ -1356,12 +1375,59 @@ export const useGameStore = create<GameState>((set, get) => ({
       nextOrder.splice(clampedIndex, 0, movedCardId)
 
       return {
+        decks: state.decks.map((entry) => (
+          entry.id === state.examinedStack?.deckId
+            ? { ...entry, cardIds: fromExaminedCardOrder(nextOrder) }
+            : entry
+        )),
         examinedStack: {
           ...state.examinedStack,
           cardOrder: nextOrder,
         },
       }
     }),
+  removeCardFromExaminedStack: (cardId) => {
+    let removedIndex: number | null = null
+
+    set((state) => {
+      if (!state.examinedStack) return state
+      const removedCardIndex = state.examinedStack.cardOrder.indexOf(cardId)
+      if (removedCardIndex === -1) return state
+
+      removedIndex = removedCardIndex
+      const nextOrder = state.examinedStack.cardOrder.filter((id) => id !== cardId)
+
+      return {
+        decks: nextOrder.length === 0
+          ? state.decks.filter((entry) => entry.id !== state.examinedStack?.deckId)
+          : state.decks.map((entry) => (
+              entry.id === state.examinedStack?.deckId
+                ? { ...entry, cardIds: fromExaminedCardOrder(nextOrder) }
+                : entry
+            )),
+        cards: state.cards.map((card) => (
+          card.id === cardId
+            ? {
+                ...card,
+                location: 'table',
+                laneId: undefined,
+                regionId: undefined,
+                attachmentGroupId: undefined,
+                attachmentIndex: undefined,
+              }
+            : card
+        )),
+        examinedStack: nextOrder.length === 0
+          ? null
+          : {
+              ...state.examinedStack,
+              cardOrder: nextOrder,
+            },
+      }
+    })
+
+    return removedIndex
+  },
   commitExaminedStackOrder: () =>
     set((state) => {
       if (!state.examinedStack) return state
@@ -1372,11 +1438,14 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
 
       return {
-        decks: state.decks.map((entry) => entry.id === deckId ? { ...entry, cardIds: [...cardOrder] } : entry),
+        decks: state.decks.map((entry) => (
+          entry.id === deckId
+            ? { ...entry, cardIds: fromExaminedCardOrder(cardOrder) }
+            : entry
+        )),
         examinedStack: {
           ...state.examinedStack,
           originalCardOrder: [...cardOrder],
-          pendingClosePrompt: false,
         },
       }
     }),
@@ -1395,23 +1464,27 @@ export const useGameStore = create<GameState>((set, get) => ({
         examinedStack: state.examinedStack?.deckId === deckId
           ? {
               ...state.examinedStack,
-              cardOrder: [...shuffledCardIds],
-              originalCardOrder: [...shuffledCardIds],
-              pendingClosePrompt: false,
+              cardOrder: toExaminedCardOrder(shuffledCardIds),
+              originalCardOrder: toExaminedCardOrder(shuffledCardIds),
             }
           : state.examinedStack,
       }
     }),
   closeExaminedStackAndKeepOrder: () => {
-    get().commitExaminedStackOrder()
-    set({ examinedStack: null })
+    set((state) => ({
+      cards: restoreExaminedStackFaceDown(state.cards, state.examinedStack),
+      examinedStack: null,
+    }))
   },
   closeExaminedStackAndShuffle: () => {
     const examinedStack = get().examinedStack
     if (!examinedStack) return
     get().commitExaminedStackOrder()
     get().shuffleDeck(examinedStack.deckId)
-    set({ examinedStack: null })
+    set((state) => ({
+      cards: restoreExaminedStackFaceDown(state.cards, state.examinedStack),
+      examinedStack: null,
+    }))
   },
   createDeck: (card1Id, card2Id) =>
     set((state) => {

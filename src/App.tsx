@@ -5,7 +5,6 @@ import { CardPreview } from './components/CardPreview'
 import { BoardMenu } from './components/BoardMenu'
 import { NewGameModal } from './components/NewGameModal'
 import { BoardShortcuts } from './components/BoardShortcuts'
-import { ExamineStackModal } from './components/ExamineStackModal'
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal'
 import { useGameStore } from './store'
 import { parseGameSessionFileContent, persistImportedGameSession, startGameSessionAutosave, bootstrapStoredGameSession } from './sessionPersistence'
@@ -74,7 +73,6 @@ function App() {
       <SelectionOverlay />
       <CardPreview />
       <NewGameModal isOpen={isNewGameOpen} onClose={() => setIsNewGameOpen(false)} />
-      <ExamineStackModal />
       <KeyboardShortcutsModal isOpen={isKeyboardShortcutsOpen} onClose={() => setIsKeyboardShortcutsOpen(false)} />
     </div>
   )

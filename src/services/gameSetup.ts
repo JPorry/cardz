@@ -143,6 +143,17 @@ function sortStackWithLowestStageOnTop(cards: CardState[]): CardState[] {
   return [...cards].sort((left, right) => (right.stage ?? 0) - (left.stage ?? 0))
 }
 
+function shuffleCards(cards: CardState[]): CardState[] {
+  const nextCards = [...cards]
+  for (let index = nextCards.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1))
+    const current = nextCards[index]
+    nextCards[index] = nextCards[swapIndex]
+    nextCards[swapIndex] = current
+  }
+  return nextCards
+}
+
 async function buildHeroSetup(
   hero: HeroDeckReference,
 ): Promise<{ heroCards: CardState[]; heroCard: MarvelCard }> {
@@ -245,11 +256,16 @@ export async function prepareGameSetup(selection: GameSetupSelection): Promise<P
   const playerAreaCards = heroCards
     .filter((card) => card.isIdentity || hasPermanentKeyword(card))
   const playerAreaIds = new Set(playerAreaCards.map((card) => card.id))
-  const playerDeckCards = heroCards.filter((card) => !playerAreaIds.has(card.id))
+  const playerDeckCards = shuffleCards(heroCards.filter((card) => !playerAreaIds.has(card.id)))
 
   const villainStages = selection.villainMode === 'hard' ? new Set([2, 3]) : new Set([1, 2])
   const villainStackCards = sortStackWithLowestStageOnTop(
     encounterCards.filter((card) => card.typeCode === 'villain' && villainStages.has(card.stage ?? -1)),
+  )
+  const discardedVillainStageIds = new Set(
+    encounterCards
+      .filter((card) => card.typeCode === 'villain' && !villainStages.has(card.stage ?? -1))
+      .map((card) => card.id),
   )
   const mainSchemeStackCards = sortStackWithLowestStageOnTop(
     encounterCards.filter((card) => card.typeCode === 'main_scheme'),
@@ -262,8 +278,9 @@ export async function prepareGameSetup(selection: GameSetupSelection): Promise<P
     ...villainStackCards.map((card) => card.id),
     ...mainSchemeStackCards.map((card) => card.id),
     ...villainAreaCards.map((card) => card.id),
+    ...discardedVillainStageIds,
   ])
-  const villainDeckCards = encounterCards.filter((card) => !placedEncounterIds.has(card.id))
+  const villainDeckCards = shuffleCards(encounterCards.filter((card) => !placedEncounterIds.has(card.id)))
 
   return {
     playerDeckCards,

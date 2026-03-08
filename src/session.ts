@@ -1,9 +1,9 @@
 import { INITIAL_LANES, INITIAL_REGIONS } from './utils/boardUtils'
-import type { CardLocation, CardState, DeckState, GameState, LaneState, RegionState } from './store'
+import type { CardLocation, CardState, DeckState, ExaminedStackState, GameState, LaneState, RegionState } from './store'
 import type { TitlePosition } from './utils/areaLayout'
 import { normalizeCardCounters, normalizeCardStatuses } from './utils/cardMetadata'
 
-export const GAME_SESSION_VERSION = 2
+export const GAME_SESSION_VERSION = 3
 export const GAME_SESSION_STORAGE_KEY = `marvel-champions-session-v${GAME_SESSION_VERSION}`
 
 export interface SerializedGameSessionState {
@@ -11,6 +11,7 @@ export interface SerializedGameSessionState {
   decks: DeckState[]
   lanes: LaneState[]
   regions: RegionState[]
+  examinedStack: ExaminedStackState | null
 }
 
 export interface SerializedGameSession {
@@ -240,6 +241,23 @@ function parseRegionState(value: unknown): RegionState {
   }
 }
 
+function parseExaminedStackState(value: unknown): ExaminedStackState | null {
+  if (value === undefined || value === null) {
+    return null
+  }
+
+  if (!isObject(value) || !isString(value.deckId)) {
+    throw new Error('Invalid examined stack entry.')
+  }
+
+  return {
+    deckId: value.deckId,
+    cardOrder: parseStringArray(value.cardOrder, 'examinedStack.cardOrder'),
+    originalCardOrder: parseStringArray(value.originalCardOrder, 'examinedStack.originalCardOrder'),
+    hiddenDeck: value.hiddenDeck === undefined ? true : Boolean(value.hiddenDeck),
+  }
+}
+
 function cloneCard(card: CardState): CardState {
   return {
     ...card,
@@ -271,6 +289,16 @@ function cloneRegion(region: RegionState): RegionState {
   return {
     ...region,
     position: [...region.position],
+  }
+}
+
+function cloneExaminedStack(examinedStack: ExaminedStackState | null): ExaminedStackState | null {
+  if (!examinedStack) return null
+
+  return {
+    ...examinedStack,
+    cardOrder: [...examinedStack.cardOrder],
+    originalCardOrder: [...examinedStack.originalCardOrder],
   }
 }
 
@@ -324,18 +352,19 @@ function createDefaultResetState(): ResettableGameState {
 }
 
 export function createSessionStateSnapshot(
-  state: Pick<GameState, 'cards' | 'decks' | 'lanes' | 'regions'>,
+  state: Pick<GameState, 'cards' | 'decks' | 'lanes' | 'regions' | 'examinedStack'>,
 ): SerializedGameSessionState {
   return {
     cards: state.cards.map(cloneCard),
     decks: state.decks.map(cloneDeck),
     lanes: state.lanes.map(cloneLane),
     regions: state.regions.map(cloneRegion),
+    examinedStack: cloneExaminedStack(state.examinedStack),
   }
 }
 
 export function exportSerializedGameSession(
-  state: Pick<GameState, 'cards' | 'decks' | 'lanes' | 'regions'>,
+  state: Pick<GameState, 'cards' | 'decks' | 'lanes' | 'regions' | 'examinedStack'>,
 ): SerializedGameSession {
   return {
     version: GAME_SESSION_VERSION,
@@ -365,6 +394,7 @@ export function parseSerializedGameSession(value: unknown): SerializedGameSessio
   const decks = value.state.decks
   const lanes = value.state.lanes
   const regions = value.state.regions
+  const examinedStack = 'examinedStack' in value.state ? value.state.examinedStack : null
 
   if (!Array.isArray(cards) || !Array.isArray(decks) || !Array.isArray(lanes) || !Array.isArray(regions)) {
     throw new Error('Session payload must include cards, decks, lanes, and regions arrays.')
@@ -378,6 +408,7 @@ export function parseSerializedGameSession(value: unknown): SerializedGameSessio
       decks: decks.map(parseDeckState),
       lanes: lanes.map(parseLaneState),
       regions: regions.map(parseRegionState),
+      examinedStack: parseExaminedStackState(examinedStack),
     },
   }
 }
@@ -390,5 +421,6 @@ export function createImportedGameState(session: SerializedGameSession): Resetta
     decks: session.state.decks.map(cloneDeck),
     lanes: session.state.lanes.map(cloneLane).map(applyConfiguredLaneTitlePosition),
     regions: session.state.regions.map(cloneRegion).map(applyConfiguredRegionTitlePosition),
+    examinedStack: cloneExaminedStack(session.state.examinedStack),
   }
 }
