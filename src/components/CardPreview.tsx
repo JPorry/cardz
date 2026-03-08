@@ -38,17 +38,17 @@ function withAlpha(hex: string, alpha: string) {
 
 function getStatusToggleStyle(color: string, active: boolean): React.CSSProperties {
   return {
-    minHeight: '72px',
-    borderRadius: '18px',
+    minHeight: '60px',
+    borderRadius: '16px',
     border: `1px solid ${color}`,
     background: active
       ? `linear-gradient(180deg, ${withAlpha(color, '66')}, ${withAlpha(color, '38')})`
       : `linear-gradient(180deg, ${withAlpha(color, '20')}, rgba(255,255,255,0.015))`,
     color: active ? 'white' : 'rgba(255,255,255,0.92)',
     fontWeight: 700,
-    fontSize: '16px',
+    fontSize: '15px',
     cursor: 'pointer',
-    padding: '12px 16px',
+    padding: '10px 14px',
     boxShadow: active
       ? `0 18px 38px ${withAlpha(color, '2e')}, inset 0 1px 0 ${withAlpha(color, '5c')}`
       : `inset 0 1px 0 ${withAlpha(color, '1f')}`,
@@ -295,6 +295,7 @@ export const CardPreview: React.FC = () => {
           onClick={closePreview}
         >
           <div
+            className="card-preview-shell"
             style={{
               width: 'min(96vw, 1260px)',
               maxHeight: '92vh',
@@ -334,15 +335,19 @@ export const CardPreview: React.FC = () => {
               ×
             </button>
             <div
-              className="card-preview-grid"
+              className="card-preview-grid card-preview-content"
               style={{
                 display: 'grid',
                 gridTemplateColumns: 'minmax(0, 1.1fr) minmax(320px, 0.9fr)',
                 gap: '20px',
                 alignItems: 'stretch',
+                maxHeight: 'calc(92vh - 40px)',
+                overflow: 'auto',
+                paddingRight: '4px',
               }}
             >
               <div
+                className="card-preview-art"
                 style={{
                   minHeight: 'min(78vh, 860px)',
                   borderRadius: '20px',
@@ -394,9 +399,10 @@ export const CardPreview: React.FC = () => {
                 </div>
 
                 <div
+                  className="card-preview-counters"
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
                     gap: '12px',
                   }}
                 >
@@ -404,14 +410,14 @@ export const CardPreview: React.FC = () => {
                     <div
                       key={counter.key}
                       style={{
-                        padding: '16px 18px',
-                        borderRadius: '18px',
+                        padding: '14px 16px',
+                        borderRadius: '16px',
                         background: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03))',
                         border: `1px solid ${CARD_COUNTER_BADGE_COLORS[counter.key]}`,
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: '14px',
-                        minHeight: '132px',
+                        gap: '10px',
+                        minHeight: '108px',
                         boxShadow: previewCard.counters[counter.key] > 0
                           ? `inset 0 1px 0 ${withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], '33')}`
                           : 'none',
@@ -430,7 +436,7 @@ export const CardPreview: React.FC = () => {
                           style={{
                             color: 'white',
                             fontWeight: 700,
-                            fontSize: '16px',
+                            fontSize: '15px',
                             lineHeight: 1.15,
                             wordBreak: 'break-word',
                           }}
@@ -447,10 +453,10 @@ export const CardPreview: React.FC = () => {
                             background: withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], '26'),
                             border: `1px solid ${withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], '5c')}`,
                             color: '#f3f7fb',
-                            fontSize: '11px',
+                            fontSize: '10px',
                             fontWeight: 700,
                             letterSpacing: '0.12em',
-                            minWidth: '58px',
+                            minWidth: '52px',
                             flexShrink: 0,
                           }}
                         >
@@ -463,7 +469,7 @@ export const CardPreview: React.FC = () => {
                           gridTemplateColumns: 'auto auto auto',
                           justifyContent: 'center',
                           alignItems: 'center',
-                          gap: '16px',
+                          gap: '12px',
                         }}
                       >
                         <button
@@ -474,13 +480,13 @@ export const CardPreview: React.FC = () => {
                         </button>
                         <div
                           style={{
-                            minWidth: '52px',
-                            padding: '10px 14px',
-                            borderRadius: '16px',
+                            minWidth: '48px',
+                            padding: '8px 12px',
+                            borderRadius: '14px',
                             textAlign: 'center',
                             color: 'white',
                             fontWeight: 800,
-                            fontSize: '24px',
+                            fontSize: '22px',
                             fontVariantNumeric: 'tabular-nums',
                             background: withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], previewCard.counters[counter.key] > 0 ? '1f' : '10'),
                             border: `1px solid ${withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], previewCard.counters[counter.key] > 0 ? '52' : '2e')}`,
@@ -570,8 +576,39 @@ export const CardPreview: React.FC = () => {
             .card-preview-grid {
               grid-template-columns: 1fr;
             }
+            .card-preview-content {
+              max-height: calc(92vh - 40px);
+            }
+            .card-preview-art {
+              min-height: auto !important;
+            }
+            .card-preview-counters {
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            }
             .card-preview-statuses {
-              grid-template-columns: 1fr;
+              grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+          }
+          @media (max-width: 820px) {
+            .card-preview-shell {
+              width: min(100vw - 20px, 1260px) !important;
+            }
+            .card-preview-content {
+              gap: 16px !important;
+            }
+            .card-preview-counters {
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            }
+            .card-preview-statuses {
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            }
+          }
+          @media (max-width: 640px) {
+            .card-preview-counters {
+              grid-template-columns: 1fr !important;
+            }
+            .card-preview-statuses {
+              grid-template-columns: 1fr !important;
             }
           }
         `}
@@ -581,13 +618,13 @@ export const CardPreview: React.FC = () => {
 }
 
 const stepperButtonStyle: React.CSSProperties = {
-  width: '52px',
-  height: '52px',
-  borderRadius: '16px',
+  width: '46px',
+  height: '46px',
+  borderRadius: '14px',
   border: '1px solid rgba(255,255,255,0.08)',
   background: 'rgba(255,255,255,0.08)',
   color: 'white',
-  fontSize: '30px',
+  fontSize: '26px',
   fontWeight: 700,
   cursor: 'pointer',
   display: 'flex',
