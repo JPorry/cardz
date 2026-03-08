@@ -332,15 +332,21 @@ export class Card3D {
     const frontMaterial = new THREE.MeshBasicMaterial({
       map: frontTexture,
       transparent: true,
-      depthTest: false,
+      depthTest: true,
       depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
       side: THREE.DoubleSide,
     });
     const backMaterial = new THREE.MeshBasicMaterial({
       map: backTexture,
       transparent: true,
-      depthTest: false,
+      depthTest: true,
       depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
       side: THREE.DoubleSide,
     });
 
@@ -604,6 +610,10 @@ export class Card3D {
       const renderOrderOffset = object.userData.renderOrderOffset ?? 0;
       object.renderOrder = order + renderOrderOffset;
     });
+  }
+
+  setDragging(dragging: boolean) {
+    this.isDragging = dragging
   }
 
   setOverlayRendering(enabled: boolean) {

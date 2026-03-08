@@ -9,9 +9,9 @@
     {
       "id": "lane-villain-area",
       "label": "Villain Area",
-      "x": 8.25,
+      "x": 4.125,
       "y": 0,
-      "width": 13.7,
+      "width": 17.825,
       "depth": 4,
       "cardSpacing": 2.4,
       "flipped": false
@@ -53,21 +53,6 @@
       "label": "Main Scheme",
       "titlePosition": "bottom",
       "x": 0,
-      "y": 0,
-      "width": 3.625,
-      "depth": 4,
-      "flipped": false,
-      "actions": [
-        {
-          "name": "Advance",
-          "type": "advance"
-        }
-      ]
-    },
-    {
-      "id": "region-villain",
-      "label": "Villain",
-      "x": 4.125,
       "y": 0,
       "width": 3.625,
       "depth": 4,

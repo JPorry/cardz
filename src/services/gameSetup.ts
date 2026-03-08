@@ -139,10 +139,6 @@ function hasPermanentKeyword(card: CardState): boolean {
   return Boolean(card.text && /permanent/i.test(card.text))
 }
 
-function sortStackWithLowestStageOnTop(cards: CardState[]): CardState[] {
-  return [...cards].sort((left, right) => (right.stage ?? 0) - (left.stage ?? 0))
-}
-
 function shuffleCards(cards: CardState[]): CardState[] {
   const nextCards = [...cards]
   for (let index = nextCards.length - 1; index > 0; index -= 1) {
@@ -247,47 +243,85 @@ async function buildNemesisDeck(heroCard: MarvelCard): Promise<CardState[]> {
   return nemesisCards.map((card, index) => normalizeCard(card, 'nemesis-card', index))
 }
 
+async function buildHeroObligations(heroCard: MarvelCard): Promise<CardState[]> {
+  if (!heroCard.pack_code || !heroCard.card_set_code) {
+    throw new Error(`Hero card ${heroCard.code} is missing pack or set information for obligation lookup.`)
+  }
+
+  const packCards = await fetchPackCards(heroCard.pack_code)
+  const obligationCards = packCards
+    .filter(hasFrontArtwork)
+    .filter((card) => card.type_code === 'obligation' && card.card_set_code === heroCard.card_set_code)
+
+  if (obligationCards.length === 0) {
+    throw new Error(`No obligation cards found for ${heroCard.name} in pack ${heroCard.pack_code}.`)
+  }
+
+  return obligationCards.map((card, index) => normalizeCard(card, 'obligation-card', index))
+}
+
 export async function prepareGameSetup(selection: GameSetupSelection): Promise<PreparedGameSetup> {
   const [{ heroCards, heroCard }, encounterCards] = await Promise.all([
     buildHeroSetup(selection.hero),
     buildEncounterDeck(selection.villain, selection.modular, selection.difficulty),
   ])
-  const nemesisCards = await buildNemesisDeck(heroCard)
-  const playerAreaCards = heroCards
+  const [nemesisCards, obligationCards] = await Promise.all([
+    buildNemesisDeck(heroCard),
+    buildHeroObligations(heroCard),
+  ])
+  const obligationCodes = new Set(obligationCards.map((card) => card.code))
+  const playerPoolCards = heroCards.filter((card) => !obligationCodes.has(card.code))
+
+  const playerAreaCards = playerPoolCards
     .filter((card) => card.isIdentity || hasPermanentKeyword(card))
   const playerAreaIds = new Set(playerAreaCards.map((card) => card.id))
-  const playerDeckCards = shuffleCards(heroCards.filter((card) => !playerAreaIds.has(card.id)))
+  const playerDeckCards = shuffleCards(playerPoolCards.filter((card) => !playerAreaIds.has(card.id)))
 
-  const villainStages = selection.villainMode === 'hard' ? new Set([2, 3]) : new Set([1, 2])
-  const villainStackCards = sortStackWithLowestStageOnTop(
-    encounterCards.filter((card) => card.typeCode === 'villain' && villainStages.has(card.stage ?? -1)),
-  )
+  const currentVillainStage = selection.villainMode === 'hard' ? 2 : 1
+  const hiddenVillainStage = selection.villainMode === 'hard' ? 3 : 2
+  const villainStageCards = encounterCards.filter((card) => (
+    card.typeCode === 'villain'
+    && (card.stage === currentVillainStage || card.stage === hiddenVillainStage)
+  ))
+  const hiddenVillainCard = villainStageCards.find((card) => card.stage === hiddenVillainStage)
+  const currentVillainCard = villainStageCards.find((card) => card.stage === currentVillainStage)
+
+  if (!hiddenVillainCard || !currentVillainCard) {
+    throw new Error(`Could not find villain setup stages ${hiddenVillainStage} and ${currentVillainStage}.`)
+  }
+
   const discardedVillainStageIds = new Set(
     encounterCards
-      .filter((card) => card.typeCode === 'villain' && !villainStages.has(card.stage ?? -1))
+      .filter((card) => card.typeCode === 'villain' && ![currentVillainStage, hiddenVillainStage].includes(card.stage ?? -1))
       .map((card) => card.id),
   )
-  const mainSchemeStackCards = sortStackWithLowestStageOnTop(
-    encounterCards.filter((card) => card.typeCode === 'main_scheme'),
-  )
-  const villainAreaCards = encounterCards.filter((card) => (
+  const mainSchemeStackCards = [...encounterCards.filter((card) => card.typeCode === 'main_scheme')]
+    .sort((left, right) => (right.stage ?? 0) - (left.stage ?? 0))
+  const villainPermanentCards = encounterCards.filter((card) => (
     card.cardSetCode === selection.villain.card_set_code && hasPermanentKeyword(card)
   ))
+  const villainAreaCards = [
+    { ...hiddenVillainCard, faceUp: false },
+    { ...currentVillainCard, faceUp: true },
+    ...villainPermanentCards.map((card) => ({ ...card, faceUp: true })),
+  ]
 
   const placedEncounterIds = new Set([
-    ...villainStackCards.map((card) => card.id),
+    hiddenVillainCard.id,
+    currentVillainCard.id,
     ...mainSchemeStackCards.map((card) => card.id),
-    ...villainAreaCards.map((card) => card.id),
+    ...villainPermanentCards.map((card) => card.id),
     ...discardedVillainStageIds,
   ])
-  const villainDeckCards = shuffleCards(encounterCards.filter((card) => !placedEncounterIds.has(card.id)))
+  const villainDeckPool = encounterCards.filter((card) => !placedEncounterIds.has(card.id))
+  villainDeckPool.push(...obligationCards.map((card) => ({ ...card, faceUp: false, location: 'deck' as const })))
+  const villainDeckCards = shuffleCards(villainDeckPool)
 
   return {
     playerDeckCards,
     playerAreaCards,
     villainDeckCards,
     villainAreaCards,
-    villainStackCards,
     mainSchemeStackCards,
     nemesisDeckCards: nemesisCards,
     selection: {

@@ -6,10 +6,10 @@ import { Lane3D } from './Lane3D';
 import { Region3D } from './Region3D';
 import { ExamineStrip3D } from './ExamineStrip3D';
 import { getCardBackUrl } from '../services/marvelCdb';
-import { getCardTableEuler, TABLE_CARD_SCALE } from '../utils/cardOrientation';
+import { CARD_WIDTH, getCardTableEuler, TABLE_CARD_SCALE } from '../utils/cardOrientation';
 import { BOARD_CONFIG } from '../config/board';
 
-const DRAG_PLANE_Y = 0.5;
+const DRAG_PLANE_Y = 2.25;
 const HAND_DROP_THRESHOLD = -0.5;
 const HAND_CARD_SPACING = 1.625;
 const HAND_DISTANCE = 3;
@@ -17,6 +17,8 @@ const HAND_BASE_SCALE = 0.36;
 const HAND_FOCUSED_SCALE = 0.52;
 const HAND_FOCUSED_LIFT = 1.5;
 const HAND_BASE_Y_OFFSET = -3.5;
+const HAND_VIEWPORT_PADDING = 0.4;
+const DRAG_RENDER_ORDER = 20000;
 
 type DraggedCardOrigin = {
   cardId: string;
@@ -534,7 +536,7 @@ export class SceneManager {
             const liftedY = this.examineStrip.group.position.y + 0.62
             const lockedZ = this.examineStrip.group.position.z + 0.9
             card3D.group.position.set(hit.x, liftedY, lockedZ)
-            card3D.setRenderOrder(13000)
+            card3D.setRenderOrder(DRAG_RENDER_ORDER)
 
             const fromIndex = this.getExaminedCardIndex(this.activeDragCardId!)
             const toIndex = this.getExaminedInsertIndex(hit.x, this.activeDragCardId!)
@@ -711,7 +713,8 @@ export class SceneManager {
         
         const card3D = this.cards.get(cardId);
         if (card3D) {
-          card3D.isDragging = true;
+          card3D.setDragging(true);
+          card3D.setRenderOrder(DRAG_RENDER_ORDER);
           store.setDragging(true, 'card', cardId);
         }
         return
@@ -808,7 +811,7 @@ export class SceneManager {
         const card3D = this.cards.get(this.activeDragCardId)
         if (card3D) {
           card3D.setGhostOpacity(0)
-          card3D.isDragging = false
+          card3D.setDragging(false)
         }
 
         this.activeDragCardId = null
@@ -850,7 +853,7 @@ export class SceneManager {
        } else if (dropTarget?.type === 'card') {
           const targetCard = store.cards.find(c => c.id === dropTarget.id);
           if (targetCard?.regionId) {
-            store.dropSelectionIntoRegion([{ id: this.activeDragDeckId, kind: 'deck' }], targetCard.regionId);
+            store.dropSelectionIntoRegion([{ id: this.activeDragDeckId, kind: 'deck' }], targetCard.regionId, false);
           } else {
             // Drop deck onto a single card: add the card to the bottom of the deck
             store.addCardUnderDeck(dropTarget.id, this.activeDragDeckId);
@@ -859,7 +862,7 @@ export class SceneManager {
             }
           }
        } else if (region) {
-          store.dropSelectionIntoRegion([{ id: this.activeDragDeckId, kind: 'deck' }], region.id);
+          store.dropSelectionIntoRegion([{ id: this.activeDragDeckId, kind: 'deck' }], region.id, false);
        } else {
           // Dropping on table outside lane
           store.removeFromLane(this.activeDragDeckId);
@@ -909,14 +912,14 @@ export class SceneManager {
 	          } else if (dropTarget?.type === 'card') {
              const targetCard = store.cards.find((card) => card.id === dropTarget.id)
              if (targetCard?.regionId) {
-               store.dropSelectionIntoRegion([{ id: this.activeDragCardId, kind: 'card' }], targetCard.regionId);
+               store.dropSelectionIntoRegion([{ id: this.activeDragCardId, kind: 'card' }], targetCard.regionId, false);
              } else {
 	               store.createDeck(this.activeDragCardId, dropTarget.id);
              }
 	          } else if (dropTarget?.type === 'deck') {
 	             store.addCardToDeck(this.activeDragCardId, dropTarget.id);
 	          } else if (region) {
-             store.dropSelectionIntoRegion([{ id: this.activeDragCardId, kind: 'card' }], region.id);
+             store.dropSelectionIntoRegion([{ id: this.activeDragCardId, kind: 'card' }], region.id, false);
 	          } else {
              // Dropping outside any lane — remove from lane if it was in one
              if (BOARD_CONFIG.allowDirectTableCardDrop === false) {
@@ -964,7 +967,7 @@ export class SceneManager {
     // Now release the drag state
     if (this.activeDragCardId) {
       const c3D = this.cards.get(this.activeDragCardId);
-      if (c3D) c3D.isDragging = false;
+      if (c3D) c3D.setDragging(false);
     }
     if (this.activeDragDeckId) {
       const store2 = useGameStore.getState();
@@ -972,7 +975,7 @@ export class SceneManager {
       if (deck) {
         deck.cardIds.forEach(id => {
           const c3D = this.cards.get(id);
-          if (c3D) c3D.isDragging = false;
+          if (c3D) c3D.setDragging(false);
         });
       }
     }
@@ -1063,7 +1066,8 @@ export class SceneManager {
 
       const card3D = this.cards.get(cardId)
       if (card3D) {
-        card3D.isDragging = true
+        card3D.setDragging(true)
+        card3D.setRenderOrder(DRAG_RENDER_ORDER)
       }
 
       store.setDragging(true, 'card', cardId)
@@ -1082,7 +1086,8 @@ export class SceneManager {
 
       const card3D = this.cards.get(extractedCardId)
       if (card3D) {
-        card3D.isDragging = true
+        card3D.setDragging(true)
+        card3D.setRenderOrder(DRAG_RENDER_ORDER)
       }
 
       store.setDragging(true, 'card', extractedCardId)
@@ -1096,7 +1101,8 @@ export class SceneManager {
 
     const card3D = this.cards.get(cardId)
     if (card3D) {
-      card3D.isDragging = true
+      card3D.setDragging(true)
+      card3D.setRenderOrder(DRAG_RENDER_ORDER)
     }
 
     store.setDragging(true, 'card', cardId)
@@ -1167,14 +1173,20 @@ export class SceneManager {
     items.forEach((item) => {
       if (item.kind === 'card') {
         const card3D = this.cards.get(item.id)
-        if (card3D) card3D.isDragging = dragging
+        if (card3D) {
+          card3D.setDragging(dragging)
+          if (dragging) card3D.setRenderOrder(DRAG_RENDER_ORDER)
+        }
         return
       }
 
       const deck = store.decks.find((entry) => entry.id === item.id)
       deck?.cardIds.forEach((cardId) => {
         const card3D = this.cards.get(cardId)
-        if (card3D) card3D.isDragging = dragging
+        if (card3D) {
+          card3D.setDragging(dragging)
+          if (dragging) card3D.setRenderOrder(DRAG_RENDER_ORDER)
+        }
       })
     })
   }
@@ -1699,7 +1711,7 @@ export class SceneManager {
 
   private dropSelectionIntoRegion(items: SelectionItem[], regionId: string) {
     const store = useGameStore.getState()
-    store.dropSelectionIntoRegion(items, regionId)
+    store.dropSelectionIntoRegion(items, regionId, false)
   }
 
   private moveSelectionToTable(items: SelectionItem[]) {
@@ -1979,15 +1991,32 @@ export class SceneManager {
   private getHandWorldPosition(slotIndex: number, totalHandCards: number, liftHUD = 0) {
     this.camera.updateMatrixWorld();
 
-    const startX = -((totalHandCards - 1) * HAND_CARD_SPACING) / 2;
-    const xOffset = startX + slotIndex * HAND_CARD_SPACING;
+    const handSpacing = this.getHandCardSpacing(totalHandCards)
+    const startX = -((totalHandCards - 1) * handSpacing) / 2;
+    const xOffset = startX + slotIndex * handSpacing;
     const vector = new THREE.Vector3(
-      xOffset * HAND_BASE_SCALE,
+      xOffset,
       (HAND_BASE_Y_OFFSET + liftHUD) * HAND_BASE_SCALE,
       -HAND_DISTANCE,
     );
 
     return vector.applyMatrix4(this.camera.matrixWorld);
+  }
+
+  private getHandCardSpacing(totalHandCards: number) {
+    const defaultSpacing = HAND_CARD_SPACING * HAND_BASE_SCALE
+    if (totalHandCards <= 1) return defaultSpacing
+
+    const halfVerticalFov = THREE.MathUtils.degToRad(this.camera.fov) / 2
+    const viewHeight = 2 * HAND_DISTANCE * Math.tan(halfVerticalFov)
+    const viewWidth = viewHeight * this.camera.aspect
+    const scaledHandCardWidth = CARD_WIDTH * HAND_BASE_SCALE
+    const availableCenterSpan = Math.max(
+      0,
+      viewWidth - scaledHandCardWidth - HAND_VIEWPORT_PADDING * 2,
+    )
+
+    return Math.min(defaultSpacing, availableCenterSpan / (totalHandCards - 1))
   }
 
   private getHandSlotScreenX(slotIndex: number, totalHandCards: number) {
@@ -2156,6 +2185,7 @@ export class SceneManager {
       if (!card3D) continue;
 
       const inDeck = cardData.location === 'deck';
+      const handIndex = cardData.location === 'hand' ? displayHandIds.indexOf(cardData.id) : -1
       const examinedIndex = this.getExaminedCardIndex(cardData.id)
       card3D.setOverlayRendering(examinedIndex >= 0)
       const attachmentRenderOrder = examinedIndex >= 0
@@ -2163,9 +2193,9 @@ export class SceneManager {
         : cardData.attachmentGroupId
         ? 40 + (100 - (cardData.attachmentIndex ?? 0))
         : cardData.location === 'hand'
-          ? 20
+          ? 200 + Math.max(0, handIndex)
           : 10
-      card3D.setRenderOrder(attachmentRenderOrder);
+      card3D.setRenderOrder(card3D.isDragging ? DRAG_RENDER_ORDER : attachmentRenderOrder);
       const deck = cardToDeckMap.get(cardData.id);
       const isSelectedCard = state.selectedItems.some((item) => item.kind === 'card' && item.id === cardData.id)
       const isSelectedDeck = deck
@@ -2305,11 +2335,13 @@ export class SceneManager {
         );
         card3D.targetScale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE);
       } else if (cardData.location === 'hand') {
-        const indexInHand = displayHandIds.indexOf(cardData.id);
+        const indexInHand = handIndex;
         const isFocused = state.focusedCardId === cardData.id;
         const currentScale = isFocused ? HAND_FOCUSED_SCALE : HAND_BASE_SCALE;
         const liftHUD = isFocused ? HAND_FOCUSED_LIFT : 0;
         const vector = this.getHandWorldPosition(indexInHand, totalHandCards, liftHUD);
+        const depthOffset = this.camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(indexInHand * 0.0025)
+        vector.add(depthOffset)
         
         const worldQuat = this.camera.quaternion.clone();
         const localQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 6);

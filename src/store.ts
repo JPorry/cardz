@@ -90,7 +90,6 @@ export interface GameSetupLayout {
   playerAreaCards: CardState[]
   villainDeckCards: CardState[]
   villainAreaCards: CardState[]
-  villainStackCards: CardState[]
   mainSchemeStackCards: CardState[]
   nemesisDeckCards: CardState[]
 }
@@ -199,7 +198,7 @@ export interface GameState {
   removeFromLane: (itemId: string) => void
   removeFromRegion: (itemId: string) => void
   reconcileRegion: (regionId: string) => void
-  dropSelectionIntoRegion: (items: SelectionItem[], regionId: string) => void
+  dropSelectionIntoRegion: (items: SelectionItem[], regionId: string, selectSettledItems?: boolean) => void
   tapCard: (id: string) => void
   tapCards: (ids: string[]) => void
   flipDeck: (deckId: string) => void
@@ -496,9 +495,20 @@ function applyFaceStateFromContainer<T extends { faceUp: boolean }>(
   regions: RegionState[],
   laneId?: string,
   regionId?: string,
+  preserveFaceUp = false,
 ): T {
+  if (preserveFaceUp) return item
   const flipped = getContainerFlippedDefault(lanes, regions, laneId, regionId);
   return flipped === undefined ? item : { ...item, faceUp: !flipped };
+}
+
+function normalizeCardForDeck<T extends CardState>(card: T): T {
+  return card.tapped ? { ...card, tapped: false } : card
+}
+
+function normalizeCardsForDeck(cardIds: string[], cards: CardState[]): CardState[] {
+  const cardIdSet = new Set(cardIds)
+  return cards.map((card) => (cardIdSet.has(card.id) ? normalizeCardForDeck(card) : card))
 }
 
 function selectionItemsEqual(a: SelectionItem, b: SelectionItem): boolean {
@@ -582,6 +592,7 @@ function prepareCardsForLane(
   itemOrder: string[],
   lanes: LaneState[],
   regions: RegionState[],
+  preserveFaceUp = false,
 ): CardState[] {
   return cards.map((card, index) => (
     applyFaceStateFromContainer(
@@ -592,12 +603,13 @@ function prepareCardsForLane(
         regionId: undefined,
         position: computeLaneSlotPosition(lane, index, cards, [], itemOrder),
         rotation: [0, 0, 0] as [number, number, number],
-        faceUp: false,
+        faceUp: preserveFaceUp ? card.faceUp : false,
       },
       lanes,
       regions,
       lane.id,
       undefined,
+      preserveFaceUp,
     )
   ))
 }
@@ -725,7 +737,7 @@ function buildRegionSettlement(
     cards: state.cards.map((card) => (
       cardIdSet.has(card.id)
         ? applyFaceStateFromContainer(
-            {
+            normalizeCardForDeck({
               ...card,
               location: 'deck',
               laneId: undefined,
@@ -734,7 +746,7 @@ function buildRegionSettlement(
               rotation: [...normalizedRotation],
               attachmentGroupId: undefined,
               attachmentIndex: undefined,
-            },
+            }),
             state.lanes,
             state.regions,
             undefined,
@@ -1229,7 +1241,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         cards: state.cards.map((card) => (
           removedIds.includes(card.id)
             ? applyFaceStateFromContainer(
-                {
+                normalizeCardForDeck({
                   ...card,
                   location: 'deck',
                   laneId: undefined,
@@ -1238,7 +1250,7 @@ export const useGameStore = create<GameState>((set, get) => ({
                   attachmentIndex: undefined,
                   position: [...deckPosition],
                   rotation: [...deckRotation],
-                },
+                }),
                 state.lanes,
                 state.regions,
                 laneId,
@@ -1313,7 +1325,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         cards: state.cards.map((card) => (
           combinedCardIds.includes(card.id)
             ? applyFaceStateFromContainer(
-                {
+                normalizeCardForDeck({
                   ...card,
                   location: 'deck',
                   laneId: undefined,
@@ -1322,7 +1334,7 @@ export const useGameStore = create<GameState>((set, get) => ({
                   attachmentIndex: undefined,
                   position: [...deckPosition],
                   rotation: [...deckRotation],
-                },
+                }),
                 state.lanes,
                 state.regions,
                 laneId,
@@ -1524,14 +1536,14 @@ export const useGameStore = create<GameState>((set, get) => ({
         cards: state.cards.map(c => 
           (c.id === card1Id || c.id === card2Id) 
             ? applyFaceStateFromContainer(
-                {
+                normalizeCardForDeck({
                   ...c,
                   location: 'deck',
                   laneId: undefined,
                   regionId: undefined,
                   attachmentGroupId: undefined,
                   attachmentIndex: undefined,
-                },
+                }),
                 state.lanes,
                 state.regions,
                 laneId,
@@ -1557,14 +1569,14 @@ export const useGameStore = create<GameState>((set, get) => ({
         cards: state.cards.map(c => 
           c.id === cardId
             ? applyFaceStateFromContainer(
-                {
+                normalizeCardForDeck({
                   ...c,
                   location: 'deck',
                   laneId: undefined,
                   regionId: undefined,
                   attachmentGroupId: undefined,
                   attachmentIndex: undefined,
-                },
+                }),
                 state.lanes,
                 state.regions,
                 targetDeck?.laneId,
@@ -1590,14 +1602,14 @@ export const useGameStore = create<GameState>((set, get) => ({
         cards: state.cards.map(c =>
           c.id === cardId
             ? applyFaceStateFromContainer(
-                {
+                normalizeCardForDeck({
                   ...c,
                   location: 'deck',
                   laneId: undefined,
                   regionId: undefined,
                   attachmentGroupId: undefined,
                   attachmentIndex: undefined,
-                },
+                }),
                 state.lanes,
                 state.regions,
                 targetDeck?.laneId,
@@ -1634,7 +1646,7 @@ export const useGameStore = create<GameState>((set, get) => ({
                 }
               : d
           ),
-        cards: state.cards.map((card) => (
+        cards: normalizeCardsForDeck(sourceDeck.cardIds, state.cards).map((card) => (
           sourceDeck.cardIds.includes(card.id)
             ? applyFaceStateFromContainer(
                 { ...card },
@@ -1919,7 +1931,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       ...reconcileRegionState(state, regionId),
     }))
   },
-  dropSelectionIntoRegion: (items, regionId) => {
+  dropSelectionIntoRegion: (items, regionId, selectSettledItems = true) => {
     set((state) => {
       const region = getRegionById(state.regions, regionId)
       if (!region) return state
@@ -1952,7 +1964,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           incomingItemIds,
           new Set([...existingDecks.map((deck) => deck.id), ...incomingDeckIds]),
           preferredDeckId,
-          true,
+          selectSettledItems,
         ),
       }
     })
@@ -1962,7 +1974,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       const { lanes: freshLanes, regions: freshRegions } = createFreshBoardLayout()
       const playerDeckRegion = freshRegions.find((region) => region.id === 'region-player-deck')
       const mainSchemeRegion = freshRegions.find((region) => region.id === 'region-main-scheme')
-      const villainRegion = freshRegions.find((region) => region.id === 'region-villain')
       const villainDeckRegion = freshRegions.find((region) => region.id === 'region-villain-deck')
       const nemesisDeckRegion = freshRegions.find((region) => region.id === 'region-nemesis-deck')
       const playerAreaLane = freshLanes.find((lane) => lane.id === 'lane-player-area')
@@ -1971,7 +1982,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       if (
         !playerDeckRegion
         || !mainSchemeRegion
-        || !villainRegion
         || !villainDeckRegion
         || !nemesisDeckRegion
         || !playerAreaLane
@@ -1982,7 +1992,6 @@ export const useGameStore = create<GameState>((set, get) => ({
 
       const heroDeckId = 'deck-hero'
       const encounterDeckId = 'deck-encounter'
-      const villainStackDeckId = 'deck-villain'
       const mainSchemeDeckId = 'deck-main-scheme'
       const nemesisDeckId = 'deck-nemesis'
 
@@ -2018,12 +2027,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         villainAreaOrder,
         freshLanes,
         freshRegions,
-      )
-      const preparedVillainStackCards = prepareCardsForRegion(
-        setup.villainStackCards,
-        villainRegion,
-        freshLanes,
-        freshRegions,
+        true,
       )
       const preparedMainSchemeCards = prepareCardsForRegion(
         setup.mainSchemeStackCards,
@@ -2054,13 +2058,6 @@ export const useGameStore = create<GameState>((set, get) => ({
           regionId: villainDeckRegion.id,
         },
         {
-          id: villainStackDeckId,
-          position: computeRegionCardPosition(villainRegion),
-          rotation: [0, 0, 0] as [number, number, number],
-          cardIds: preparedVillainStackCards.map((card) => card.id),
-          regionId: villainRegion.id,
-        },
-        {
           id: mainSchemeDeckId,
           position: computeRegionCardPosition(mainSchemeRegion, true),
           rotation: [0, 0, 0] as [number, number, number],
@@ -2082,7 +2079,6 @@ export const useGameStore = create<GameState>((set, get) => ({
           ...preparedPlayerAreaCards,
           ...preparedVillainDeckCards,
           ...preparedVillainAreaCards,
-          ...preparedVillainStackCards,
           ...preparedMainSchemeCards,
           ...preparedNemesisCards,
         ].map((card) => withCardMetadata(card)),
