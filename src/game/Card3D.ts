@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import type { CardState } from '../store';
 import { CARD_HEIGHT, CARD_WIDTH, getCardTableEuler } from '../utils/cardOrientation';
-import { hasVisibleCardMetadata } from '../utils/cardMetadata';
+import {
+  CARD_COUNTER_BADGE_COLORS,
+  CARD_STATUS_BADGE_COLORS,
+  hasVisibleCardMetadata,
+} from '../utils/cardMetadata';
 
 const CARD_THICKNESS = 0.025;
 const OVERLAY_TEXTURE_WIDTH = 512;
@@ -446,10 +450,10 @@ export class Card3D {
     }
 
     const badges = [
-      { key: 'damage', label: 'DMG', color: '#c62828' },
-      { key: 'acceleration', label: 'ACC', color: '#ef6c00' },
-      { key: 'threat', label: 'THR', color: '#1565c0' },
-      { key: 'allPurpose', label: 'ALL', color: '#2e7d32' },
+      { key: 'damage', label: 'DMG', color: CARD_COUNTER_BADGE_COLORS.damage },
+      { key: 'acceleration', label: 'ACC', color: CARD_COUNTER_BADGE_COLORS.acceleration },
+      { key: 'threat', label: 'THR', color: CARD_COUNTER_BADGE_COLORS.threat },
+      { key: 'allPurpose', label: 'ALL', color: CARD_COUNTER_BADGE_COLORS.allPurpose },
     ] as const;
     const activeBadges = badges.filter(({ key }) => cardData.counters[key] > 0);
     const badgeWidth = 112;
@@ -474,9 +478,9 @@ export class Card3D {
     });
 
     const statuses = [
-      { key: 'stunned', label: 'STUN', color: '#ad1457' },
-      { key: 'confused', label: 'CONF', color: '#4527a0' },
-      { key: 'tough', label: 'TOUGH', color: '#1b5e20' },
+      { key: 'stunned', label: 'STUN', color: CARD_STATUS_BADGE_COLORS.stunned },
+      { key: 'confused', label: 'CONF', color: CARD_STATUS_BADGE_COLORS.confused },
+      { key: 'tough', label: 'TOUGH', color: CARD_STATUS_BADGE_COLORS.tough },
     ] as const;
     const activeStatuses = statuses.filter(({ key }) => cardData.statuses[key]);
     const chipGap = 12;

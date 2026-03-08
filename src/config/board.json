@@ -56,7 +56,13 @@
       "y": 0,
       "width": 3.625,
       "depth": 4,
-      "flipped": false
+      "flipped": false,
+      "actions": [
+        {
+          "name": "Advance",
+          "type": "advance"
+        }
+      ]
     },
     {
       "id": "region-villain",
@@ -65,7 +71,13 @@
       "y": 0,
       "width": 3.625,
       "depth": 4,
-      "flipped": false
+      "flipped": false,
+      "actions": [
+        {
+          "name": "Advance",
+          "type": "advance"
+        }
+      ]
     },
     {
       "id": "region-villain-deck",
@@ -74,7 +86,18 @@
       "y": 0,
       "width": 3.625,
       "depth": 4,
-      "flipped": true
+      "flipped": true,
+      "actions": [
+        {
+          "name": "Reveal Card",
+          "count": 1,
+          "type": "deal",
+          "to": {
+            "kind": "lane",
+            "id": "lane-villain-area"
+          }
+        }
+      ]
     },
     {
       "id": "region-villain-discard",
@@ -83,7 +106,18 @@
       "y": 0,
       "width": 3.625,
       "depth": 4,
-      "flipped": false
+      "flipped": false,
+      "actions": [
+        {
+          "name": "Rebuild Villain Deck",
+          "type": "recover",
+          "from": {
+            "kind": "region",
+            "id": "region-villain-discard"
+          },
+          "shuffle": true
+        }
+      ]
     },
     {
       "id": "region-nemesis-deck",
@@ -92,7 +126,44 @@
       "y": 4.5,
       "width": 3.625,
       "depth": 4,
-      "flipped": true
+      "flipped": true,
+      "actions": [
+        {
+          "name": "Reveal Nemesis Set",
+          "type": "sequence",
+          "steps": [
+            {
+              "type": "deal",
+              "match": {
+                "typeCode": "minion"
+              },
+              "to": {
+                "kind": "lane",
+                "id": "lane-enemy-area"
+              }
+            },
+            {
+              "type": "deal",
+              "match": {
+                "typeCode": "side_scheme"
+              },
+              "to": {
+                "kind": "lane",
+                "id": "lane-enemy-area"
+              }
+            },
+            {
+              "type": "merge",
+              "to": {
+                "kind": "region",
+                "id": "region-villain-deck"
+              },
+              "insertAt": "top",
+              "shuffle": true
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "region-player-deck",
@@ -101,7 +172,16 @@
       "y": 13.5,
       "width": 3.625,
       "depth": 4,
-      "flipped": true
+      "flipped": true,
+      "actions": [
+        {
+          "name": "Deal Card",
+          "type": "deal",
+          "to": {
+            "kind": "hand"
+          }
+        }
+      ]
     },
     {
       "id": "region-player-discard",
@@ -110,7 +190,18 @@
       "y": 13.5,
       "width": 3.625,
       "depth": 4,
-      "flipped": false
+      "flipped": false,
+      "actions": [
+        {
+          "name": "Rebuild Deck",
+          "type": "recover",
+          "from": {
+            "kind": "region",
+            "id": "region-player-discard"
+          },
+          "shuffle": true
+        }
+      ]
     }
   ]
 }

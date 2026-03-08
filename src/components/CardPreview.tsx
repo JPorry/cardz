@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useGameStore } from '../store'
-import type { CardCounterKey, CardStatusKey } from '../utils/cardMetadata'
+import {
+  CARD_COUNTER_BADGE_COLORS,
+  CARD_STATUS_BADGE_COLORS,
+  type CardCounterKey,
+  type CardStatusKey,
+} from '../utils/cardMetadata'
 
 const PORTRAIT_RATIO = 1 / 1.4
 const HOVER_PORTRAIT_HEIGHT = 525
@@ -17,27 +22,39 @@ const COUNTER_CONTROLS: Array<{ key: CardCounterKey, label: string, shortLabel: 
   { key: 'allPurpose', label: 'All Purpose', shortLabel: 'ALL' },
 ]
 
-const COUNTER_BADGE_COLORS: Record<CardCounterKey, string> = {
-  damage: '#c62828',
-  acceleration: '#ef6c00',
-  threat: '#1565c0',
-  allPurpose: '#2e7d32',
-}
-
 const STATUS_CONTROLS: Array<{ key: CardStatusKey, label: string }> = [
   { key: 'stunned', label: 'Stunned' },
   { key: 'confused', label: 'Confused' },
   { key: 'tough', label: 'Tough' },
 ]
 
-const STATUS_BADGE_COLORS: Record<CardStatusKey, string> = {
-  stunned: '#ad1457',
-  confused: '#4527a0',
-  tough: '#1b5e20',
-}
-
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
+}
+
+function withAlpha(hex: string, alpha: string) {
+  return `${hex}${alpha}`
+}
+
+function getStatusToggleStyle(color: string, active: boolean): React.CSSProperties {
+  return {
+    minHeight: '72px',
+    borderRadius: '18px',
+    border: `1px solid ${color}`,
+    background: active
+      ? `linear-gradient(180deg, ${withAlpha(color, '66')}, ${withAlpha(color, '38')})`
+      : `linear-gradient(180deg, ${withAlpha(color, '20')}, rgba(255,255,255,0.015))`,
+    color: active ? 'white' : 'rgba(255,255,255,0.92)',
+    fontWeight: 700,
+    fontSize: '16px',
+    cursor: 'pointer',
+    padding: '12px 16px',
+    boxShadow: active
+      ? `0 18px 38px ${withAlpha(color, '2e')}, inset 0 1px 0 ${withAlpha(color, '5c')}`
+      : `inset 0 1px 0 ${withAlpha(color, '1f')}`,
+    opacity: active ? 1 : 0.82,
+    transition: 'transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, opacity 120ms ease',
+  }
 }
 
 export const CardPreview: React.FC = () => {
@@ -205,7 +222,7 @@ export const CardPreview: React.FC = () => {
                       height: '54px',
                       padding: '4px',
                       borderRadius: '10px',
-                      background: COUNTER_BADGE_COLORS[counter.key],
+                      background: CARD_COUNTER_BADGE_COLORS[counter.key],
                       color: 'white',
                       fontWeight: 800,
                       boxShadow: '0 10px 18px rgba(0,0,0,0.28)',
@@ -243,7 +260,7 @@ export const CardPreview: React.FC = () => {
                     style={{
                       padding: '7px 14px',
                       borderRadius: '999px',
-                      background: STATUS_BADGE_COLORS[status.key],
+                      background: CARD_STATUS_BADGE_COLORS[status.key],
                       border: '1px solid rgba(255,255,255,0.16)',
                       color: 'white',
                       fontSize: '11px',
@@ -364,7 +381,7 @@ export const CardPreview: React.FC = () => {
                   style={{
                     padding: '18px',
                     borderRadius: '20px',
-                    background: 'rgba(255,255,255,0.06)',
+                    background: 'linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03))',
                     border: '1px solid rgba(255,255,255,0.08)',
                   }}
                 >
@@ -389,15 +406,26 @@ export const CardPreview: React.FC = () => {
                       style={{
                         padding: '16px 18px',
                         borderRadius: '18px',
-                        background: 'rgba(255,255,255,0.06)',
-                        border: '1px solid rgba(255,255,255,0.08)',
+                        background: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03))',
+                        border: `1px solid ${CARD_COUNTER_BADGE_COLORS[counter.key]}`,
                         display: 'flex',
                         flexDirection: 'column',
                         gap: '14px',
                         minHeight: '132px',
+                        boxShadow: previewCard.counters[counter.key] > 0
+                          ? `inset 0 1px 0 ${withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], '33')}`
+                          : 'none',
                       }}
                     >
-                      <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          minWidth: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '10px',
+                        }}
+                      >
                         <div
                           style={{
                             color: 'white',
@@ -409,7 +437,23 @@ export const CardPreview: React.FC = () => {
                         >
                           {counter.label}
                         </div>
-                        <div style={{ color: 'rgba(255,255,255,0.58)', fontSize: '12px', letterSpacing: '0.08em' }}>
+                        <div
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: '5px 10px',
+                            borderRadius: '999px',
+                            background: withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], '26'),
+                            border: `1px solid ${withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], '5c')}`,
+                            color: '#f3f7fb',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            letterSpacing: '0.12em',
+                            minWidth: '58px',
+                            flexShrink: 0,
+                          }}
+                        >
                           {counter.shortLabel}
                         </div>
                       </div>
@@ -431,11 +475,18 @@ export const CardPreview: React.FC = () => {
                         <div
                           style={{
                             minWidth: '52px',
+                            padding: '10px 14px',
+                            borderRadius: '16px',
                             textAlign: 'center',
                             color: 'white',
                             fontWeight: 800,
                             fontSize: '24px',
                             fontVariantNumeric: 'tabular-nums',
+                            background: withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], previewCard.counters[counter.key] > 0 ? '1f' : '10'),
+                            border: `1px solid ${withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], previewCard.counters[counter.key] > 0 ? '52' : '2e')}`,
+                            boxShadow: previewCard.counters[counter.key] > 0
+                              ? `0 12px 30px ${withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], '22')}`
+                              : 'none',
                           }}
                         >
                           {previewCard.counters[counter.key]}
@@ -455,7 +506,7 @@ export const CardPreview: React.FC = () => {
                   style={{
                     padding: '16px',
                     borderRadius: '20px',
-                    background: 'rgba(255,255,255,0.06)',
+                    background: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03))',
                     border: '1px solid rgba(255,255,255,0.08)',
                   }}
                 >
@@ -465,23 +516,35 @@ export const CardPreview: React.FC = () => {
                   <div className="card-preview-statuses" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px' }}>
                     {STATUS_CONTROLS.map((status) => {
                       const active = previewCard.statuses[status.key]
+                      const color = CARD_STATUS_BADGE_COLORS[status.key]
                       return (
                         <button
                           key={status.key}
                           onClick={() => toggleCardStatus(previewCard.id, status.key)}
-                          style={{
-                            minHeight: '64px',
-                            borderRadius: '18px',
-                            border: active ? '1px solid rgba(123, 235, 181, 0.5)' : '1px solid rgba(255,255,255,0.08)',
-                            background: active ? 'rgba(72, 160, 111, 0.36)' : 'rgba(255,255,255,0.04)',
-                            color: 'white',
-                            fontWeight: 700,
-                            fontSize: '16px',
-                            cursor: 'pointer',
-                            padding: '12px',
-                          }}
+                          style={getStatusToggleStyle(color, active)}
                         >
-                          {status.label}
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '10px',
+                            }}
+                          >
+                            <span
+                              aria-hidden="true"
+                              style={{
+                                width: '10px',
+                                height: '10px',
+                                borderRadius: '999px',
+                                background: active ? color : 'rgba(214, 214, 219, 0.7)',
+                                boxShadow: active
+                                  ? `0 0 0 6px ${withAlpha(color, '2b')}`
+                                  : 'none',
+                              }}
+                            />
+                            <span>{status.label}</span>
+                          </span>
                         </button>
                       )
                     })}

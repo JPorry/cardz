@@ -14,6 +14,19 @@ export interface CardStatuses {
 export type CardCounterKey = keyof CardCounters
 export type CardStatusKey = keyof CardStatuses
 
+export const CARD_COUNTER_BADGE_COLORS: Record<CardCounterKey, string> = {
+  damage: '#e53935',
+  acceleration: '#fb8c00',
+  threat: '#1e88e5',
+  allPurpose: '#43a047',
+}
+
+export const CARD_STATUS_BADGE_COLORS: Record<CardStatusKey, string> = {
+  stunned: '#d81b60',
+  confused: '#5e35b1',
+  tough: '#2e7d32',
+}
+
 export const DEFAULT_CARD_COUNTERS: CardCounters = {
   damage: 0,
   acceleration: 0,

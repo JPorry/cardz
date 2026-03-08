@@ -1,4 +1,5 @@
 import { useGameStore, type CardState, type GameState, type SelectionItem, type StackTargetContext } from '../store'
+import { getRegionContextualActions } from '../services/boardActions'
 
 export type OrderedSelectionItem = SelectionItem & {
   x: number
@@ -10,19 +11,11 @@ export type OrderedSelectionItem = SelectionItem & {
   rotation: [number, number, number]
 }
 
-export type SelectionAction =
-  | { id: 'reveal-card'; label: 'Reveal'; execute: () => void }
-  | { id: 'flip-stack'; label: 'Flip'; execute: () => void }
-  | { id: 'tap-stack'; label: 'Tap'; execute: () => void }
-  | { id: 'advance-stack'; label: 'Advance'; execute: () => void }
-  | { id: 'examine-stack'; label: 'Examine'; execute: () => void }
-  | { id: 'flip-cards'; label: 'Flip'; execute: () => void }
-  | { id: 'tap-cards'; label: 'Tap'; execute: () => void }
-  | { id: 'stack-cards'; label: 'Stack'; execute: () => void }
-  | { id: 'attach-cards'; label: 'Attach'; execute: () => void }
-  | { id: 'detach-attachment'; label: 'Detach'; execute: () => void }
-  | { id: 'tap-mixed'; label: 'Tap'; execute: () => void }
-  | { id: 'combine'; label: 'Combine'; execute: () => void }
+export interface SelectionAction {
+  id: string
+  label: string
+  execute: () => void
+}
 
 export type SelectionActionSet = {
   orderedItems: OrderedSelectionItem[]
@@ -140,7 +133,7 @@ export function getSelectionActionSet(
   const selectedCards = getSelectedCards(state, selectedCardIds)
   const selectedAttachmentGroupId = getSingleAttachmentGroupId(selectedCards)
   const canAttachSelection = selectedDeckIds.length === 0 && canAttachCards(selectedCards)
-  const { flipCards, tapCards, flipStack, tapDeck, advanceStack, attachCards, detachAttachmentGroup, createStackFromCards, combineSelectionIntoStack, setPreviewCard, openDeckExamine } = state
+  const { flipCards, tapCards, flipStack, tapDeck, shuffleDeck, attachCards, detachAttachmentGroup, createStackFromCards, combineSelectionIntoStack, setPreviewCard, openDeckExamine } = state
 
   const actions: SelectionAction[] = []
 
@@ -152,9 +145,10 @@ export function getSelectionActionSet(
     actions.push(
       { id: 'flip-stack', label: 'Flip', execute: () => flipStack(selectedDeckIds[0]) },
       { id: 'tap-stack', label: 'Tap', execute: () => tapDeck(selectedDeckIds[0]) },
-      { id: 'advance-stack', label: 'Advance', execute: () => advanceStack(selectedDeckIds[0]) },
+      { id: 'shuffle-stack', label: 'Shuffle', execute: () => shuffleDeck(selectedDeckIds[0]) },
       { id: 'examine-stack', label: 'Examine', execute: () => openDeckExamine(selectedDeckIds[0]) },
     )
+    actions.push(...getRegionContextualActions(state, actionItems))
     return { orderedItems, selectedCardIds, selectedDeckIds, actions }
   }
 
@@ -169,6 +163,7 @@ export function getSelectionActionSet(
         { id: 'flip-cards', label: 'Flip', execute: () => flipCards(selectedCardIds) },
         { id: 'tap-cards', label: 'Tap', execute: () => tapCards(selectedCardIds) },
       )
+      actions.push(...getRegionContextualActions(state, actionItems))
       return { orderedItems, selectedCardIds, selectedDeckIds, actions }
     }
 
@@ -215,6 +210,7 @@ export function getSelectionActionSet(
     )
   }
 
+  actions.push(...getRegionContextualActions(state, actionItems))
   return { orderedItems, selectedCardIds, selectedDeckIds, actions }
 }
 

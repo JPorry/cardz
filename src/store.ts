@@ -187,7 +187,10 @@ export interface GameState {
   addCardToDeck: (cardId: string, deckId: string) => void
   addCardUnderDeck: (cardId: string, deckId: string) => void
   addDeckToDeck: (sourceDeckId: string, targetDeckId: string) => void
+  mergeDeckIntoDeck: (sourceDeckId: string, targetDeckId: string, insertAt?: 'top' | 'bottom') => void
   removeTopCardFromDeck: (deckId: string) => string | null
+  removeBottomCardFromDeck: (deckId: string) => string | null
+  setRegionStackCards: (regionId: string, orderedCardIds: string[]) => void
   moveDeck: (id: string, position?: [number, number, number], rotation?: [number, number, number], laneId?: string, regionId?: string) => void
   dissolveDeck: (deckId: string) => void
   getLaneSlotPosition: (laneId: string, slotIndex: number) => [number, number, number] | null
@@ -1532,10 +1535,12 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
     }),
   addDeckToDeck: (sourceDeckId, targetDeckId) =>
+    get().mergeDeckIntoDeck(sourceDeckId, targetDeckId, 'top'),
+  mergeDeckIntoDeck: (sourceDeckId, targetDeckId, insertAt = 'top') =>
     set((state) => {
       const sourceDeck = state.decks.find(d => d.id === sourceDeckId)
       const targetDeck = state.decks.find(d => d.id === targetDeckId)
-      if (!sourceDeck) return state
+      if (!sourceDeck || !targetDeck || sourceDeckId === targetDeckId) return state
       
       return {
         lanes: state.lanes.map(lane => {
@@ -1548,22 +1553,25 @@ export const useGameStore = create<GameState>((set, get) => ({
           .filter(d => d.id !== sourceDeckId)
           .map(d => 
             d.id === targetDeckId
-              ? { ...d, cardIds: [...d.cardIds, ...sourceDeck.cardIds] } // target on bottom, source on top
+              ? {
+                  ...d,
+                  cardIds: insertAt === 'bottom'
+                    ? [...sourceDeck.cardIds, ...d.cardIds]
+                    : [...d.cardIds, ...sourceDeck.cardIds],
+                }
               : d
           ),
-        cards: targetDeck
-          ? state.cards.map((card) => (
-              sourceDeck.cardIds.includes(card.id)
-                ? applyFaceStateFromContainer(
-                    { ...card },
-                    state.lanes,
-                    state.regions,
-                    targetDeck.laneId,
-                    targetDeck.regionId,
-                  )
-                : card
-            ))
-          : state.cards,
+        cards: state.cards.map((card) => (
+          sourceDeck.cardIds.includes(card.id)
+            ? applyFaceStateFromContainer(
+                { ...card },
+                state.lanes,
+                state.regions,
+                targetDeck.laneId,
+                targetDeck.regionId,
+              )
+            : card
+        )),
       }
     }),
   removeTopCardFromDeck: (deckId: string) => {
@@ -1625,6 +1633,81 @@ export const useGameStore = create<GameState>((set, get) => ({
     })
     return topCardId
   },
+  removeBottomCardFromDeck: (deckId: string) => {
+    let bottomCardId: string | null = null
+    set((state) => {
+      const deck = state.decks.find((d: DeckState) => d.id === deckId)
+      if (!deck || deck.cardIds.length === 0) return state
+
+      bottomCardId = deck.cardIds[0]
+      const remainingIds = deck.cardIds.slice(1)
+      const isDissolving = remainingIds.length === 1
+      const lastCardId = isDissolving ? remainingIds[0] : null
+
+      const updatedLanes = state.lanes.map((lane) => {
+        if (isDissolving && deck.laneId === lane.id) {
+          return {
+            ...lane,
+            itemOrder: lane.itemOrder.map((id) => id === deckId ? lastCardId! : id),
+          }
+        }
+
+        return lane
+      })
+
+      return {
+        lanes: updatedLanes,
+        decks: remainingIds.length <= 1
+          ? state.decks.filter((d: DeckState) => d.id !== deckId)
+          : state.decks.map((d: DeckState) => d.id === deckId ? { ...d, cardIds: remainingIds } : d),
+        cards: state.cards.map((c: CardState) => {
+          if (c.id === bottomCardId) {
+            return {
+              ...c,
+              location: 'table',
+              laneId: undefined,
+              regionId: undefined,
+              position: [...deck.position],
+              rotation: [...deck.rotation],
+              attachmentGroupId: undefined,
+              attachmentIndex: undefined,
+            }
+          }
+          if (isDissolving && c.id === lastCardId) {
+            return {
+              ...c,
+              location: 'table',
+              laneId: deck.laneId,
+              regionId: deck.regionId,
+              position: [...deck.position],
+              rotation: [...deck.rotation],
+              attachmentGroupId: undefined,
+              attachmentIndex: undefined,
+            }
+          }
+          return c
+        }),
+      }
+    })
+    return bottomCardId
+  },
+  setRegionStackCards: (regionId, orderedCardIds) =>
+    set((state) => ({
+      ...buildRegionSettlement(
+        state,
+        regionId,
+        orderedCardIds,
+        new Set([
+          ...state.decks.filter((deck) => deck.regionId === regionId).map((deck) => deck.id),
+          ...state.cards
+            .filter((card) => card.location === 'table' && card.regionId === regionId)
+            .map((card) => card.id),
+        ]),
+        new Set(state.decks.filter((deck) => deck.regionId === regionId).map((deck) => deck.id)),
+        state.decks.find((deck) => deck.regionId === regionId)?.id ?? null,
+        false,
+      ),
+    })),
   moveDeck: (id: string, position?: [number, number, number], rotation?: [number, number, number], laneId?: string, regionId?: string) => {
     console.log(`[Store] moveDeck: ${id}, laneId: ${laneId}, regionId: ${regionId}, pos: ${position}`);
     set((state) => {
