@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { useGameStore } from '../store'
+import { useGameStore, type SelectionItem } from '../store'
 import { useSupportsHoverPreview } from '../hooks/useSupportsHoverPreview'
+import { getCardBackUrl } from '../services/marvelCdb'
 import { getSelectionPreviewCardId } from '../utils/previewCards'
 import { getGameDefinition } from '../games/registry'
 import { getCounterBadgeColors, getStatusBadgeColors } from '../utils/cardMetadata'
+import { getOrderedSelectionItems, getSelectionActionSet } from '../utils/selectionActions'
 import {
   getHoverPreviewMetrics,
   HOVER_COUNTER_RAIL_GAP,
@@ -15,40 +17,26 @@ import {
   PORTRAIT_RATIO,
 } from '../utils/hoverPreviewLayout'
 
-function getSingleTouchPreviewSelection(
-  cards: ReturnType<typeof useGameStore.getState>['cards'],
-  selectedItems: ReturnType<typeof useGameStore.getState>['selectedItems'],
-) {
-  if (selectedItems.length === 1) {
-    return selectedItems[0]
-  }
-
-  if (selectedItems.length === 0 || selectedItems.some((item) => item.kind !== 'card')) {
-    return null
-  }
-
-  const selectedCards = selectedItems
-    .map((item) => cards.find((card) => card.id === item.id))
-    .filter((card) => Boolean(card))
-
-  if (selectedCards.length !== selectedItems.length) {
-    return null
-  }
-
-  const attachmentGroupId = selectedCards[0]?.attachmentGroupId
-  if (!attachmentGroupId || selectedCards.some((card) => card?.attachmentGroupId !== attachmentGroupId)) {
-    return null
-  }
-
-  return selectedItems[0]
-}
-
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
 }
 
 function withAlpha(hex: string, alpha: string) {
   return `${hex}${alpha}`
+}
+
+function getPreviewImageFrameStyle(radius: string): React.CSSProperties {
+  return {
+    width: '100%',
+    height: '100%',
+    borderRadius: radius,
+    overflow: 'hidden',
+    WebkitMaskImage: '-webkit-radial-gradient(white, black)',
+    clipPath: `inset(0 round ${radius})`,
+    WebkitClipPath: `inset(0 round ${radius})`,
+    transform: 'translateZ(0)',
+    isolation: 'isolate',
+  }
 }
 
 function getStatusToggleStyle(color: string, active: boolean): React.CSSProperties {
@@ -72,6 +60,47 @@ function getStatusToggleStyle(color: string, active: boolean): React.CSSProperti
   }
 }
 
+function getTouchPreviewSelection(
+  selectedItems: SelectionItem[],
+  focusedCardId: string | null,
+  cards: ReturnType<typeof useGameStore.getState>['cards'],
+  decks: ReturnType<typeof useGameStore.getState>['decks'],
+  lanes: ReturnType<typeof useGameStore.getState>['lanes'],
+  regions: ReturnType<typeof useGameStore.getState>['regions'],
+): SelectionItem | null {
+  if (selectedItems.length === 0) return null
+
+  if (focusedCardId && selectedItems.some((item) => item.kind === 'card' && item.id === focusedCardId)) {
+    return { id: focusedCardId, kind: 'card' }
+  }
+
+  const orderedItems = getOrderedSelectionItems({ cards, decks, lanes, regions }, selectedItems)
+  if (orderedItems.length > 0) {
+    return { id: orderedItems[0].id, kind: orderedItems[0].kind }
+  }
+
+  return selectedItems[0] ?? null
+}
+
+function getTouchPreviewTitle(
+  selectedItems: SelectionItem[],
+  quickPreviewCard?: { name?: string } | null,
+  selectedDeck?: { kind: 'stack' | 'sequence', cardIds: string[] } | null,
+) {
+  if (selectedItems.length === 1 && selectedItems[0]?.kind === 'card') {
+    return quickPreviewCard?.name ?? 'Card'
+  }
+
+  if (selectedItems.length === 1 && selectedItems[0]?.kind === 'deck') {
+    if (selectedDeck?.kind === 'sequence') {
+      return 'Sequence'
+    }
+    return selectedDeck?.cardIds.length ? `Stack (${selectedDeck.cardIds.length})` : 'Stack'
+  }
+
+  return `${selectedItems.length} Selected`
+}
+
 export const CardPreview: React.FC = () => {
   const {
     activeGameId,
@@ -82,9 +111,13 @@ export const CardPreview: React.FC = () => {
     focusedCardId,
     cards,
     decks,
+    lanes,
+    regions,
     selectedItems,
     selectionBounds,
     marqueeSelection,
+    examinedStack,
+    isDragging,
     setPreviewCard,
     adjustCardCounter,
     toggleCardStatus,
@@ -99,25 +132,24 @@ export const CardPreview: React.FC = () => {
   const previewOpenedAtRef = useRef<number | null>(null)
 
   const hoveredCard = cards.find((c) => c.id === hoveredCardId)
-  const touchPreviewSelection = getSingleTouchPreviewSelection(cards, selectedItems)
-  const selectedPreviewCardId = (
-    !supportsHoverPreview
-    && !previewCardId
-    && !marqueeSelection.isActive
-  )
-    ? (
-        touchQuickPreviewCardId
-        ?? (
-          touchPreviewSelection
-            ? (
-                focusedCardId
-                && selectedItems.some((item) => item.kind === 'card' && item.id === focusedCardId)
-                  ? focusedCardId
-                  : getSelectionPreviewCardId({ activeGameId, cards, decks }, touchPreviewSelection, focusedCardId)
-              )
-            : null
-        )
-      )
+  const selectedDeck = selectedItems.length === 1 && selectedItems[0]?.kind === 'deck'
+    ? decks.find((deck) => deck.id === selectedItems[0]?.id) ?? null
+    : null
+  const canShowTouchPreview = !supportsHoverPreview && !previewCardId && !marqueeSelection.isActive && !isDragging && examinedStack === null
+  const touchPreviewSelection = canShowTouchPreview
+    ? getTouchPreviewSelection(selectedItems, focusedCardId, cards, decks, lanes, regions)
+    : null
+  const baseTouchActionSet = canShowTouchPreview && selectedItems.length > 0
+    ? getSelectionActionSet(useGameStore.getState(), selectedItems)
+    : null
+  const touchActionSet = baseTouchActionSet
+    ? {
+        ...baseTouchActionSet,
+        actions: baseTouchActionSet.actions.filter((action) => action.id !== 'reveal-card'),
+      }
+    : null
+  const selectedPreviewCardId = canShowTouchPreview && touchPreviewSelection
+    ? (touchQuickPreviewCardId ?? getSelectionPreviewCardId({ activeGameId, cards, decks }, touchPreviewSelection, focusedCardId))
     : null
   const touchSelectedCard = cards.find((c) => c.id === selectedPreviewCardId)
   const quickPreviewCard = supportsHoverPreview ? hoveredCard : touchSelectedCard
@@ -125,13 +157,13 @@ export const CardPreview: React.FC = () => {
     ? hoveredCardScreenX
     : selectionBounds
       ? selectionBounds.x + selectionBounds.width / 2
-      : null
+      : window.innerWidth / 2
   const previewCard = cards.find((c) => c.id === previewCardId)
   const getVisibleArtworkUrl = (card?: typeof hoveredCard) => {
     if (!card) return undefined
     return card.faceUp
       ? card.artworkUrl
-      : card.backArtworkUrl
+      : (card.backArtworkUrl ?? getCardBackUrl(card.typeCode))
   }
   const quickPreviewArtworkUrl = getVisibleArtworkUrl(quickPreviewCard)
   const previewArtworkUrl = getVisibleArtworkUrl(previewCard)
@@ -158,7 +190,7 @@ export const CardPreview: React.FC = () => {
     previewOpenedAtRef.current = previewCardId ? performance.now() : null
   }, [previewCardId])
 
-  if (!quickPreviewCard && !previewCard) return null
+  if (!quickPreviewCard && !previewCard && (!touchActionSet || touchActionSet.actions.length === 0)) return null
 
   const getAspectRatio = (artworkUrl?: string) => {
     if (!artworkUrl) return PORTRAIT_RATIO
@@ -167,7 +199,8 @@ export const CardPreview: React.FC = () => {
 
   const previewAspectRatio = getAspectRatio(previewArtworkUrl)
   const quickPreviewAspectRatio = getAspectRatio(quickPreviewArtworkUrl)
-  const showTouchQuickPreview = !!quickPreviewCard && !previewCardId && !supportsHoverPreview && quickPreviewArtworkUrl
+  const touchActionPanelOverlap = quickPreviewAspectRatio > 1 ? 24 : 68
+  const showTouchQuickPreview = !!touchActionSet && touchActionSet.actions.length > 0 && canShowTouchPreview
   const showHoverPreview = !!quickPreviewCard && !previewCardId && supportsHoverPreview && quickPreviewArtworkUrl
   const isHoveredLeft = quickPreviewScreenX !== null && quickPreviewScreenX < window.innerWidth / 2
   const showBigPreview = !!previewCard
@@ -186,6 +219,13 @@ export const CardPreview: React.FC = () => {
         window.innerWidth,
       )
     : null
+  const touchPreviewTitle = getTouchPreviewTitle(selectedItems, quickPreviewCard, selectedDeck)
+  const canEditPreviewCard = !!(
+    quickPreviewCard
+    && touchPreviewSelection
+    && touchPreviewSelection.kind === 'card'
+    && selectedItems.some((item) => item.kind === 'card' && item.id === quickPreviewCard.id)
+  )
   const closePreview = () => {
     if (previewOpenedAtRef.current !== null && performance.now() - previewOpenedAtRef.current < 250) return
     setPreviewCard(null)
@@ -221,19 +261,28 @@ export const CardPreview: React.FC = () => {
               height: `${hoverPreviewMetrics?.hoverFrameHeight ?? 0}px`,
             }}
           >
-            <img
-              src={quickPreviewArtworkUrl}
-              alt={quickPreviewCard.name}
+            <div
               style={{
                 position: 'absolute',
                 top: 0,
                 left: 0,
                 width: `${hoverPreviewMetrics?.hoverWidth ?? 0}px`,
                 height: `${hoverPreviewMetrics?.hoverHeight ?? 0}px`,
-                objectFit: 'contain',
-                borderRadius: '10px',
+                ...getPreviewImageFrameStyle('10px'),
               }}
-            />
+            >
+              <img
+                src={quickPreviewArtworkUrl}
+                alt={quickPreviewCard.name}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                  display: 'block',
+                  transform: 'translateZ(0)',
+                }}
+              />
+            </div>
             {hoveredCounters.length > 0 && (
               <div
                 style={{
@@ -316,7 +365,7 @@ export const CardPreview: React.FC = () => {
         </div>
       )}
 
-      {showTouchQuickPreview && quickPreviewCard && (
+      {showTouchQuickPreview && touchActionSet && (
         <div
           style={{
             position: 'absolute',
@@ -328,216 +377,308 @@ export const CardPreview: React.FC = () => {
           }}
         >
           <div
-            className="card-preview-touch-shell"
             style={{
+              position: 'relative',
               width: 'min(48vw, 400px)',
               maxWidth: 'calc(100vw - 32px)',
-              maxHeight: 'calc(100vh - 48px)',
-              borderRadius: '20px',
-              overflow: 'hidden',
-              boxShadow: '0 20px 44px rgba(0,0,0,0.56)',
-              border: '1px solid rgba(255,255,255,0.12)',
-              background: 'rgba(10,10,12,0.92)',
-              backdropFilter: 'blur(12px)',
-              display: 'flex',
-              flexDirection: 'column',
             }}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
           >
             <div
-              className="card-preview-touch-art"
+              className="card-preview-touch-shell"
               style={{
-                padding: '10px 10px 8px',
+                width: '100%',
+                maxHeight: 'calc(100vh - 48px)',
+                borderRadius: '20px',
+                overflow: 'hidden',
+                boxShadow: '0 20px 44px rgba(0,0,0,0.56)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                background: 'linear-gradient(180deg, rgba(8,10,14,0.97), rgba(9,12,17,0.96))',
+                backdropFilter: 'blur(12px)',
                 display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))',
+                flexDirection: 'column',
               }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
             >
               <div
+                className="card-preview-touch-art"
                 style={{
-                  width: '100%',
-                  maxWidth: '360px',
-                  aspectRatio: `${quickPreviewAspectRatio}`,
-                  maxHeight: '52vh',
+                  padding: '10px 10px 8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'radial-gradient(circle at top left, rgba(62,102,168,0.18), transparent 52%), linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))',
                 }}
               >
-                <img
-                  src={quickPreviewArtworkUrl}
-                  alt={quickPreviewCard.name}
+                <div
                   style={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'contain',
+                    width: `min(100%, ${Math.round(52 * quickPreviewAspectRatio)}vh, 360px)`,
+                    aspectRatio: `${quickPreviewAspectRatio}`,
                     borderRadius: '14px',
+                    overflow: 'hidden',
+                    WebkitMaskImage: '-webkit-radial-gradient(white, black)',
                   }}
-                />
+                >
+                  {quickPreviewArtworkUrl ? (
+                    <div style={getPreviewImageFrameStyle('14px')}>
+                      <img
+                        src={quickPreviewArtworkUrl}
+                        alt={quickPreviewCard?.name ?? touchPreviewTitle}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'contain',
+                          display: 'block',
+                          transform: 'translateZ(0)',
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        borderRadius: '14px',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexDirection: 'column',
+                        gap: '8px',
+                        color: 'rgba(255,255,255,0.82)',
+                        textAlign: 'center',
+                        padding: '24px',
+                      }}
+                    >
+                      <div style={{ fontSize: '18px', fontWeight: 700 }}>{touchPreviewTitle}</div>
+                      <div style={{ fontSize: '12px', letterSpacing: '0.1em', textTransform: 'uppercase', opacity: 0.7 }}>
+                        No Preview Art
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
+
+              {canEditPreviewCard && quickPreviewCard && (
+                <div
+                  className="card-preview-touch-tray"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px',
+                    padding: '14px 16px 16px',
+                    borderTop: '1px solid rgba(255,255,255,0.06)',
+                    background: 'linear-gradient(180deg, rgba(11,13,18,0.96), rgba(8,9,12,0.98))',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '12px',
+                    }}
+                  >
+                    <div
+                      style={{
+                        color: 'white',
+                        fontSize: '14px',
+                        fontWeight: 700,
+                        lineHeight: 1.2,
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {quickPreviewCard.name ?? 'Card'}
+                    </div>
+                    <div
+                      style={{
+                        color: 'rgba(255,255,255,0.55)',
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        letterSpacing: '0.12em',
+                        flexShrink: 0,
+                      }}
+                    >
+                      QUICK EDIT
+                    </div>
+                  </div>
+
+                  <div
+                    className="card-preview-touch-counters"
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                      gap: '8px',
+                    }}
+                  >
+                    {counterControls.map((counter) => (
+                      <div
+                        key={counter.key}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '1fr auto auto auto',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '8px',
+                          borderRadius: '14px',
+                          border: `1px solid ${withAlpha(counterColors[counter.key], '4f')}`,
+                          background: `linear-gradient(180deg, ${withAlpha(counterColors[counter.key], '20')}, rgba(255,255,255,0.03))`,
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div
+                            style={{
+                              color: 'white',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              lineHeight: 1.1,
+                              letterSpacing: '0.12em',
+                              textTransform: 'uppercase',
+                            }}
+                          >
+                            {counter.shortLabel}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => adjustCardCounter(quickPreviewCard.id, counter.key, -1)}
+                          style={touchStepperButtonStyle}
+                        >
+                          −
+                        </button>
+                        <div
+                          style={{
+                            minWidth: '32px',
+                            padding: '6px 4px',
+                            borderRadius: '10px',
+                            textAlign: 'center',
+                            color: 'white',
+                            fontWeight: 800,
+                            fontSize: '16px',
+                            fontVariantNumeric: 'tabular-nums',
+                            background: withAlpha(counterColors[counter.key], quickPreviewCard.counters[counter.key] > 0 ? '29' : '14'),
+                            border: `1px solid ${withAlpha(counterColors[counter.key], quickPreviewCard.counters[counter.key] > 0 ? '5f' : '2e')}`,
+                          }}
+                        >
+                          {quickPreviewCard.counters[counter.key]}
+                        </div>
+                        <button
+                          onClick={() => adjustCardCounter(quickPreviewCard.id, counter.key, 1)}
+                          style={touchStepperButtonStyle}
+                        >
+                          +
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div
+                    className="card-preview-touch-statuses"
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                      gap: '8px',
+                    }}
+                  >
+                    {statusControls.map((status) => {
+                      const active = quickPreviewCard.statuses[status.key]
+                      const color = statusColors[status.key]
+                      return (
+                        <button
+                          key={status.key}
+                          onClick={() => toggleCardStatus(quickPreviewCard.id, status.key)}
+                          style={{
+                            ...getStatusToggleStyle(color, active),
+                            minHeight: '40px',
+                            fontSize: '12px',
+                            padding: '8px 10px',
+                            borderRadius: '12px',
+                          }}
+                        >
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '10px',
+                            }}
+                          >
+                            <span
+                              aria-hidden="true"
+                              style={{
+                                width: '10px',
+                                height: '10px',
+                                borderRadius: '999px',
+                                background: active ? color : 'rgba(214, 214, 219, 0.7)',
+                                boxShadow: active
+                                  ? `0 0 0 6px ${withAlpha(color, '2b')}`
+                                  : 'none',
+                              }}
+                            />
+                            <span>{status.label}</span>
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div
-              className="card-preview-touch-tray"
+              className="card-preview-touch-action-panel"
               style={{
-                display: 'flex',
-                flexDirection: 'column',
+                position: 'absolute',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                [isHoveredLeft ? 'right' : 'left']: `calc(100% - ${touchActionPanelOverlap}px)`,
+                width: 'min(18vw, 148px)',
+                maxWidth: 'calc(100vw - 32px)',
+                display: 'grid',
                 gap: '8px',
-                padding: '10px',
-                borderTop: '1px solid rgba(255,255,255,0.08)',
-                background: 'linear-gradient(180deg, rgba(14,16,20,0.96), rgba(10,11,14,0.98))',
               }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
             >
               <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '12px',
-                }}
-              >
-                <div
-                  style={{
-                    color: 'white',
-                    fontSize: '14px',
-                    fontWeight: 700,
-                    lineHeight: 1.2,
-                    minWidth: 0,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {quickPreviewCard.name ?? 'Card'}
-                </div>
-                <div
-                  style={{
-                    color: 'rgba(255,255,255,0.55)',
-                    fontSize: '10px',
-                    fontWeight: 700,
-                    letterSpacing: '0.12em',
-                    flexShrink: 0,
-                  }}
-                >
-                  QUICK EDIT
-                </div>
-              </div>
-
-              <div
-                className="card-preview-touch-counters"
+                className="card-preview-touch-actions"
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                  gridTemplateColumns: '1fr',
                   gap: '8px',
                 }}
               >
-                {counterControls.map((counter) => (
-                  <div
-                    key={counter.key}
+                {touchActionSet.actions.map((action) => (
+                  <button
+                    key={action.id}
+                    onClick={action.execute}
+                    className="card-preview-touch-action-button"
                     style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr auto auto auto',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '8px',
-                      borderRadius: '14px',
-                      border: `1px solid ${withAlpha(counterColors[counter.key], '4f')}`,
-                      background: `linear-gradient(180deg, ${withAlpha(counterColors[counter.key], '20')}, rgba(255,255,255,0.03))`,
+                      minHeight: '42px',
+                      borderRadius: '12px',
+                      border: action.id === 'reveal-card'
+                        ? '1px solid #5f95ef'
+                        : '1px solid #2e3a4a',
+                      background: action.id === 'reveal-card'
+                        ? '#2d63c2'
+                        : '#273140',
+                      boxShadow: action.id === 'reveal-card'
+                        ? '0 14px 32px rgba(20, 65, 128, 0.4), inset 0 1px 0 rgba(255,255,255,0.14)'
+                        : '0 10px 22px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.08)',
+                      color: 'white',
+                      fontSize: '15px',
+                      fontWeight: 700,
+                      textAlign: 'center',
+                      padding: '0 10px',
+                      cursor: 'pointer',
+                      touchAction: 'manipulation',
                     }}
                   >
-                    <div style={{ minWidth: 0 }}>
-                      <div
-                        style={{
-                          color: 'white',
-                          fontSize: '11px',
-                          fontWeight: 700,
-                          lineHeight: 1.1,
-                          letterSpacing: '0.12em',
-                          textTransform: 'uppercase',
-                        }}
-                      >
-                        {counter.shortLabel}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => adjustCardCounter(quickPreviewCard.id, counter.key, -1)}
-                      style={touchStepperButtonStyle}
-                    >
-                      −
-                    </button>
-                    <div
-                      style={{
-                        minWidth: '32px',
-                        padding: '6px 4px',
-                        borderRadius: '10px',
-                        textAlign: 'center',
-                        color: 'white',
-                        fontWeight: 800,
-                        fontSize: '16px',
-                        fontVariantNumeric: 'tabular-nums',
-                        background: withAlpha(counterColors[counter.key], quickPreviewCard.counters[counter.key] > 0 ? '29' : '14'),
-                        border: `1px solid ${withAlpha(counterColors[counter.key], quickPreviewCard.counters[counter.key] > 0 ? '5f' : '2e')}`,
-                      }}
-                    >
-                      {quickPreviewCard.counters[counter.key]}
-                    </div>
-                    <button
-                      onClick={() => adjustCardCounter(quickPreviewCard.id, counter.key, 1)}
-                      style={touchStepperButtonStyle}
-                    >
-                      +
-                    </button>
-                  </div>
+                    {action.label}
+                  </button>
                 ))}
-              </div>
-
-              <div
-                className="card-preview-touch-statuses"
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-                  gap: '8px',
-                }}
-              >
-                {statusControls.map((status) => {
-                  const active = quickPreviewCard.statuses[status.key]
-                  const color = statusColors[status.key]
-                  return (
-                    <button
-                      key={status.key}
-                      onClick={() => toggleCardStatus(quickPreviewCard.id, status.key)}
-                      style={{
-                        ...getStatusToggleStyle(color, active),
-                        minHeight: '40px',
-                        fontSize: '12px',
-                        padding: '8px 10px',
-                        borderRadius: '12px',
-                      }}
-                    >
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '10px',
-                        }}
-                      >
-                        <span
-                          aria-hidden="true"
-                          style={{
-                            width: '10px',
-                            height: '10px',
-                            borderRadius: '999px',
-                            background: active ? color : 'rgba(214, 214, 219, 0.7)',
-                            boxShadow: active
-                              ? `0 0 0 6px ${withAlpha(color, '2b')}`
-                              : 'none',
-                          }}
-                        />
-                        <span>{status.label}</span>
-                      </span>
-                    </button>
-                  )
-                })}
               </div>
             </div>
           </div>
@@ -631,13 +772,24 @@ export const CardPreview: React.FC = () => {
                     maxWidth: `${clamp(previewAspectRatio * 68, 30, 58)}vw`,
                     aspectRatio: `${previewAspectRatio}`,
                     maxHeight: '74vh',
+                    borderRadius: '16px',
+                    overflow: 'hidden',
+                    WebkitMaskImage: '-webkit-radial-gradient(white, black)',
                   }}
                 >
-                  <img
-                    src={previewArtworkUrl}
-                    alt={previewCard.name}
-                    style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '16px' }}
-                  />
+                  <div style={getPreviewImageFrameStyle('16px')}>
+                    <img
+                      src={previewArtworkUrl}
+                      alt={previewCard.name}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'contain',
+                        display: 'block',
+                        transform: 'translateZ(0)',
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -861,6 +1013,9 @@ export const CardPreview: React.FC = () => {
             .card-preview-touch-statuses {
               grid-template-columns: repeat(3, minmax(0, 1fr));
             }
+            .card-preview-touch-action-panel {
+              width: min(18vw, 148px) !important;
+            }
           }
           @media (max-width: 820px) {
             .card-preview-shell {
@@ -884,6 +1039,9 @@ export const CardPreview: React.FC = () => {
             .card-preview-touch-statuses {
               grid-template-columns: repeat(2, minmax(0, 1fr));
             }
+            .card-preview-touch-action-panel {
+              width: min(22vw, 144px) !important;
+            }
           }
           @media (max-width: 640px) {
             .card-preview-counters {
@@ -904,6 +1062,12 @@ export const CardPreview: React.FC = () => {
             }
             .card-preview-touch-statuses {
               grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+            .card-preview-touch-action-panel {
+              position: static !important;
+              transform: none !important;
+              width: 100% !important;
+              margin-top: 10px !important;
             }
           }
         `}

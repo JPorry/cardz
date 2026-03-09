@@ -1,4 +1,3 @@
-import { getGameDefinition } from '../games/registry'
 import { getDeckTopCardId, type GameState, type SelectionItem } from '../store'
 
 export function getSelectionPreviewCardId(
@@ -16,8 +15,5 @@ export function getSelectionPreviewCardId(
   const topCardId = getDeckTopCardId(deck)
   if (!topCardId) return null
   const topCard = state.cards.find((entry) => entry.id === topCardId)
-  if (!topCard) return null
-
-  const game = getGameDefinition(state.activeGameId)
-  return game.cardPresentation.hasVisibleGameplayFace(topCard) ? topCardId : null
+  return topCard ? topCardId : null
 }

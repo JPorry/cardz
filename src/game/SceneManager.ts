@@ -803,24 +803,6 @@ export class SceneManager {
         }
 
         if (selectionItem && (cardModel?.location === 'table' || cardModel?.location === 'deck')) {
-          const revealPreviewCardId = this.getRevealPreviewCardId(selectionItem, cardId)
-          const isTouchDoubleTap = this.isTouchLikePointer(e)
-            && revealPreviewCardId !== null
-            && this.lastClickCardId === cardId
-            && (performance.now() - this.lastClickTime < 300)
-
-          if (isTouchDoubleTap) {
-            store.setSelectedItems(selectionItems)
-            store.setPreviewCard(revealPreviewCardId)
-            this.lastClickTime = 0
-            this.lastClickCardId = null
-            this.pendingSelectionItem = null
-            this.pendingSelectionItems = []
-            this.pendingCardId = null
-            this.isPendingMarquee = false
-            return
-          }
-
           this.pendingSelectionItem = selectionItem
           this.pendingSelectionItems = selectionItems
           this.pendingCardId = cardId
@@ -876,7 +858,8 @@ export class SceneManager {
       const item = this.pendingSelectionItem
       const selectionItems = this.pendingSelectionItems.length > 0 ? this.pendingSelectionItems : [item]
       const revealPreviewCardId = this.getRevealPreviewCardId(item, this.pendingCardId)
-      const isDoubleClick = revealPreviewCardId !== null
+      const isDoubleClick = !this.isTouchLikePointer(e)
+        && revealPreviewCardId !== null
         && this.pendingCardId !== null
         && (now - this.lastClickTime < 300)
         && this.lastClickCardId === this.pendingCardId

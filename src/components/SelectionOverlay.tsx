@@ -4,7 +4,6 @@ import { useGameStore } from '../store'
 import { getSelectionPreviewCardId } from '../utils/previewCards'
 import { getSelectionActionSet } from '../utils/selectionActions'
 
-const TOUCH_MENU_DELAY_MS = 350
 const MENU_VIEWPORT_MARGIN = 20
 const MENU_OFFSET = 16
 const MENU_MAX_WIDTH = 188
@@ -82,14 +81,17 @@ export function SelectionOverlay() {
       return
     }
 
-    if (supportsImmediateMenu || selectedItems.length === 0) {
+    if (!supportsImmediateMenu) {
+      setShowMenu(false)
+      return
+    }
+
+    if (selectedItems.length === 0) {
       setShowMenu(true)
       return
     }
 
-    setShowMenu(false)
-    const timeoutId = window.setTimeout(() => setShowMenu(true), TOUCH_MENU_DELAY_MS)
-    return () => window.clearTimeout(timeoutId)
+    setShowMenu(true)
   }, [selectedItems, selectionKey, suppressedSelectionKey, dragSuppressedSelectionKey, supportsImmediateMenu, marqueeSelection.isActive])
 
   const menuStyle = selectionBounds
