@@ -2,12 +2,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import { useGameStore } from '../store'
 import { useSupportsHoverPreview } from '../hooks/useSupportsHoverPreview'
 import { getSelectionPreviewCardId } from '../utils/previewCards'
-import {
-  CARD_COUNTER_BADGE_COLORS,
-  CARD_STATUS_BADGE_COLORS,
-  type CardCounterKey,
-  type CardStatusKey,
-} from '../utils/cardMetadata'
+import { getGameDefinition } from '../games/registry'
+import { getCounterBadgeColors, getStatusBadgeColors } from '../utils/cardMetadata'
 import {
   getHoverPreviewMetrics,
   HOVER_COUNTER_RAIL_GAP,
@@ -18,19 +14,6 @@ import {
   HOVER_STATUS_RAIL_HEIGHT,
   PORTRAIT_RATIO,
 } from '../utils/hoverPreviewLayout'
-
-const COUNTER_CONTROLS: Array<{ key: CardCounterKey, label: string, shortLabel: string }> = [
-  { key: 'damage', label: 'Health', shortLabel: 'DMG' },
-  { key: 'acceleration', label: 'Acceleration', shortLabel: 'ACC' },
-  { key: 'threat', label: 'Threat', shortLabel: 'THR' },
-  { key: 'allPurpose', label: 'All Purpose', shortLabel: 'ALL' },
-]
-
-export const STATUS_CONTROLS: Array<{ key: CardStatusKey, label: string }> = [
-  { key: 'stunned', label: 'Stunned' },
-  { key: 'confused', label: 'Confused' },
-  { key: 'tough', label: 'Tough' },
-]
 
 function getSingleTouchPreviewSelection(
   cards: ReturnType<typeof useGameStore.getState>['cards'],
@@ -91,6 +74,7 @@ function getStatusToggleStyle(color: string, active: boolean): React.CSSProperti
 
 export const CardPreview: React.FC = () => {
   const {
+    activeGameId,
     hoveredCardId,
     hoveredCardScreenX,
     previewCardId,
@@ -104,6 +88,11 @@ export const CardPreview: React.FC = () => {
     adjustCardCounter,
     toggleCardStatus,
   } = useGameStore()
+  const activeGame = getGameDefinition(activeGameId)
+  const counterControls = activeGame.cardSemantics.counters
+  const statusControls = activeGame.cardSemantics.statuses
+  const counterColors = getCounterBadgeColors(counterControls)
+  const statusColors = getStatusBadgeColors(statusControls)
   const [imageAspectRatios, setImageAspectRatios] = useState<Record<string, number>>({})
   const supportsHoverPreview = useSupportsHoverPreview()
   const previewOpenedAtRef = useRef<number | null>(null)
@@ -176,10 +165,10 @@ export const CardPreview: React.FC = () => {
   const isHoveredLeft = quickPreviewScreenX !== null && quickPreviewScreenX < window.innerWidth / 2
   const showBigPreview = !!previewCard
   const hoveredCounters = quickPreviewCard
-    ? COUNTER_CONTROLS.filter((counter) => quickPreviewCard.counters[counter.key] > 0)
+    ? counterControls.filter((counter) => (quickPreviewCard.counters[counter.key] ?? 0) > 0)
     : []
   const hoveredStatuses = quickPreviewCard
-    ? STATUS_CONTROLS.filter((status) => quickPreviewCard.statuses[status.key])
+    ? statusControls.filter((status) => quickPreviewCard.statuses[status.key])
     : []
   const hoverPreviewMetrics = showHoverPreview && quickPreviewScreenX !== null
     ? getHoverPreviewMetrics(
@@ -265,7 +254,7 @@ export const CardPreview: React.FC = () => {
                       height: '54px',
                       padding: '4px',
                       borderRadius: '10px',
-                      background: CARD_COUNTER_BADGE_COLORS[counter.key],
+                      background: counterColors[counter.key],
                       color: 'white',
                       fontWeight: 800,
                       boxShadow: '0 10px 18px rgba(0,0,0,0.28)',
@@ -303,7 +292,7 @@ export const CardPreview: React.FC = () => {
                     style={{
                       padding: '7px 14px',
                       borderRadius: '999px',
-                      background: CARD_STATUS_BADGE_COLORS[status.key],
+                      background: statusColors[status.key],
                       border: '1px solid rgba(255,255,255,0.16)',
                       color: 'white',
                       fontSize: '11px',
@@ -434,7 +423,7 @@ export const CardPreview: React.FC = () => {
                   gap: '8px',
                 }}
               >
-                {COUNTER_CONTROLS.map((counter) => (
+                {counterControls.map((counter) => (
                   <div
                     key={counter.key}
                     style={{
@@ -444,8 +433,8 @@ export const CardPreview: React.FC = () => {
                       gap: '6px',
                       padding: '8px',
                       borderRadius: '14px',
-                      border: `1px solid ${withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], '4f')}`,
-                      background: `linear-gradient(180deg, ${withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], '20')}, rgba(255,255,255,0.03))`,
+                      border: `1px solid ${withAlpha(counterColors[counter.key], '4f')}`,
+                      background: `linear-gradient(180deg, ${withAlpha(counterColors[counter.key], '20')}, rgba(255,255,255,0.03))`,
                     }}
                   >
                     <div style={{ minWidth: 0 }}>
@@ -478,8 +467,8 @@ export const CardPreview: React.FC = () => {
                         fontWeight: 800,
                         fontSize: '16px',
                         fontVariantNumeric: 'tabular-nums',
-                        background: withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], quickPreviewCard.counters[counter.key] > 0 ? '29' : '14'),
-                        border: `1px solid ${withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], quickPreviewCard.counters[counter.key] > 0 ? '5f' : '2e')}`,
+                        background: withAlpha(counterColors[counter.key], quickPreviewCard.counters[counter.key] > 0 ? '29' : '14'),
+                        border: `1px solid ${withAlpha(counterColors[counter.key], quickPreviewCard.counters[counter.key] > 0 ? '5f' : '2e')}`,
                       }}
                     >
                       {quickPreviewCard.counters[counter.key]}
@@ -502,9 +491,9 @@ export const CardPreview: React.FC = () => {
                   gap: '8px',
                 }}
               >
-                {STATUS_CONTROLS.map((status) => {
+                {statusControls.map((status) => {
                   const active = quickPreviewCard.statuses[status.key]
-                  const color = CARD_STATUS_BADGE_COLORS[status.key]
+                  const color = statusColors[status.key]
                   return (
                     <button
                       key={status.key}
@@ -677,20 +666,20 @@ export const CardPreview: React.FC = () => {
                     gap: '12px',
                   }}
                 >
-                  {COUNTER_CONTROLS.map((counter) => (
+                  {counterControls.map((counter) => (
                     <div
                       key={counter.key}
                       style={{
                         padding: '14px 16px',
                         borderRadius: '16px',
                         background: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03))',
-                        border: `1px solid ${CARD_COUNTER_BADGE_COLORS[counter.key]}`,
+                        border: `1px solid ${counterColors[counter.key]}`,
                         display: 'flex',
                         flexDirection: 'column',
                         gap: '10px',
                         minHeight: '108px',
                         boxShadow: previewCard.counters[counter.key] > 0
-                          ? `inset 0 1px 0 ${withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], '33')}`
+                          ? `inset 0 1px 0 ${withAlpha(counterColors[counter.key], '33')}`
                           : 'none',
                       }}
                     >
@@ -721,8 +710,8 @@ export const CardPreview: React.FC = () => {
                             justifyContent: 'center',
                             padding: '5px 10px',
                             borderRadius: '999px',
-                            background: withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], '26'),
-                            border: `1px solid ${withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], '5c')}`,
+                            background: withAlpha(counterColors[counter.key], '26'),
+                            border: `1px solid ${withAlpha(counterColors[counter.key], '5c')}`,
                             color: '#f3f7fb',
                             fontSize: '10px',
                             fontWeight: 700,
@@ -759,10 +748,10 @@ export const CardPreview: React.FC = () => {
                             fontWeight: 800,
                             fontSize: '22px',
                             fontVariantNumeric: 'tabular-nums',
-                            background: withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], previewCard.counters[counter.key] > 0 ? '1f' : '10'),
-                            border: `1px solid ${withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], previewCard.counters[counter.key] > 0 ? '52' : '2e')}`,
+                            background: withAlpha(counterColors[counter.key], previewCard.counters[counter.key] > 0 ? '1f' : '10'),
+                            border: `1px solid ${withAlpha(counterColors[counter.key], previewCard.counters[counter.key] > 0 ? '52' : '2e')}`,
                             boxShadow: previewCard.counters[counter.key] > 0
-                              ? `0 12px 30px ${withAlpha(CARD_COUNTER_BADGE_COLORS[counter.key], '22')}`
+                              ? `0 12px 30px ${withAlpha(counterColors[counter.key], '22')}`
                               : 'none',
                           }}
                         >
@@ -791,9 +780,9 @@ export const CardPreview: React.FC = () => {
                     STATUS
                   </div>
                   <div className="card-preview-statuses" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px' }}>
-                    {STATUS_CONTROLS.map((status) => {
+                    {statusControls.map((status) => {
                       const active = previewCard.statuses[status.key]
-                      const color = CARD_STATUS_BADGE_COLORS[status.key]
+                      const color = statusColors[status.key]
                       return (
                         <button
                           key={status.key}

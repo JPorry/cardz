@@ -3,6 +3,7 @@ import { getArtworkUrl, type MarvelCard } from './marvelCdb'
 import type { HeroDeckReference } from '../config/gameSetup/heroes'
 import type { CardSetReference } from '../config/gameSetup/villains'
 import { createDefaultCardMetadata } from '../utils/cardMetadata'
+import { marvelCardSemantics } from '../games/marvel/cards'
 
 interface DecklistResponse {
   id: number
@@ -120,7 +121,7 @@ function parseStage(stage: MarvelCard['stage']): number | undefined {
 
 function normalizeCard(card: MarvelCard, prefix: string, index: number): CardState {
   return {
-    ...createDefaultCardMetadata(),
+    ...createDefaultCardMetadata(marvelCardSemantics),
     id: `${prefix}-${index + 1}`,
     location: 'deck',
     position: [0, 0, 0],
@@ -151,7 +152,7 @@ function normalizeIdentityCard(card: MarvelCard, prefix: string, index: number):
   const backFace = heroFace && heroFace.code !== frontFace.code ? heroFace : linkedCard
 
   return {
-    ...createDefaultCardMetadata(),
+    ...createDefaultCardMetadata(marvelCardSemantics),
     id: `${prefix}-${index + 1}`,
     location: 'deck',
     position: [0, 0, 0],

@@ -1,11 +1,8 @@
 import * as THREE from 'three';
-import type { CardState } from '../store';
+import { useGameStore, type CardState } from '../store';
 import { CARD_HEIGHT, CARD_WIDTH, getCardTableEuler } from '../utils/cardOrientation';
-import {
-  CARD_COUNTER_BADGE_COLORS,
-  CARD_STATUS_BADGE_COLORS,
-  hasVisibleCardMetadata,
-} from '../utils/cardMetadata';
+import { getGameDefinition } from '../games/registry';
+import { getCounterBadgeColors, getStatusBadgeColors, hasVisibleCardMetadata } from '../utils/cardMetadata';
 
 const CARD_THICKNESS = 0.025;
 const OVERLAY_TEXTURE_WIDTH = 512;
@@ -533,12 +530,14 @@ export class Card3D {
       ctx.translate(-drawWidth / 2, -drawHeight / 2);
     }
 
-    const badges = [
-      { key: 'damage', label: 'DMG', color: CARD_COUNTER_BADGE_COLORS.damage },
-      { key: 'acceleration', label: 'ACC', color: CARD_COUNTER_BADGE_COLORS.acceleration },
-      { key: 'threat', label: 'THR', color: CARD_COUNTER_BADGE_COLORS.threat },
-      { key: 'allPurpose', label: 'ALL', color: CARD_COUNTER_BADGE_COLORS.allPurpose },
-    ] as const;
+    const game = getGameDefinition(useGameStore.getState().activeGameId);
+    const counterColors = getCounterBadgeColors(game.cardSemantics.counters);
+    const statusColors = getStatusBadgeColors(game.cardSemantics.statuses);
+    const badges = game.cardSemantics.counters.map((counter) => ({
+      key: counter.key,
+      label: counter.shortLabel,
+      color: counterColors[counter.key],
+    }));
     const activeBadges = badges.filter(({ key }) => cardData.counters[key] > 0);
     const badgeWidth = 112;
     const badgeHeight = 112;
@@ -561,11 +560,11 @@ export class Card3D {
       );
     });
 
-    const statuses = [
-      { key: 'stunned', label: 'STUN', color: CARD_STATUS_BADGE_COLORS.stunned },
-      { key: 'confused', label: 'CONF', color: CARD_STATUS_BADGE_COLORS.confused },
-      { key: 'tough', label: 'TOUGH', color: CARD_STATUS_BADGE_COLORS.tough },
-    ] as const;
+    const statuses = game.cardSemantics.statuses.map((status) => ({
+      key: status.key,
+      label: status.shortLabel,
+      color: statusColors[status.key],
+    }));
     const activeStatuses = statuses.filter(({ key }) => cardData.statuses[key]);
     const chipGap = 12;
     const chipHeight = 56;
@@ -604,7 +603,7 @@ export class Card3D {
 
     const shouldShow = Boolean(
       (cardData.location === 'table' || options?.showOnTopOfDeck)
-      && hasVisibleCardMetadata(cardData.counters, cardData.statuses)
+      && hasVisibleCardMetadata(getGameDefinition(useGameStore.getState().activeGameId).cardSemantics, cardData.counters, cardData.statuses)
     );
     const nextSignature = JSON.stringify({
       faceUp: cardData.faceUp,

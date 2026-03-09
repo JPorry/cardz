@@ -1,31 +1,38 @@
 import {
   exportSerializedGameSession,
-  GAME_SESSION_STORAGE_KEY,
   parseSerializedGameSession,
   type SerializedGameSession,
 } from './session'
+import { getGameDefinition } from './games/registry'
 import { useGameStore } from './store'
 
 let hasBootstrappedSession = false
 let autosaveUnsubscribe: (() => void) | null = null
 let lastSavedSnapshot = ''
 
+function getSessionStorageKey(gameId: string, gameVersion: number) {
+  const game = getGameDefinition(gameId)
+  return `${game.session.storageKeyPrefix}-v${gameVersion}`
+}
+
 function readStoredSession(): SerializedGameSession | null {
   if (typeof window === 'undefined') {
     return null
   }
 
-  const rawValue = window.localStorage.getItem(GAME_SESSION_STORAGE_KEY)
-  if (!rawValue) {
-    return null
-  }
+  for (let index = 0; index < window.localStorage.length; index += 1) {
+    const key = window.localStorage.key(index)
+    if (!key || !key.includes('-session-v')) continue
+    const rawValue = window.localStorage.getItem(key)
+    if (!rawValue) continue
 
-  try {
-    return parseSerializedGameSession(JSON.parse(rawValue))
-  } catch {
-    window.localStorage.removeItem(GAME_SESSION_STORAGE_KEY)
-    return null
+    try {
+      return parseSerializedGameSession(JSON.parse(rawValue))
+    } catch {
+      window.localStorage.removeItem(key)
+    }
   }
+  return null
 }
 
 function writeStoredSession(session: SerializedGameSession) {
@@ -35,7 +42,7 @@ function writeStoredSession(session: SerializedGameSession) {
 
   const serialized = JSON.stringify(session)
   lastSavedSnapshot = serialized
-  window.localStorage.setItem(GAME_SESSION_STORAGE_KEY, serialized)
+  window.localStorage.setItem(getSessionStorageKey(session.state.gameId, session.state.gameVersion), serialized)
 }
 
 export function bootstrapStoredGameSession() {
@@ -65,7 +72,7 @@ export function startGameSessionAutosave() {
     }
 
     lastSavedSnapshot = nextSnapshot
-    window.localStorage.setItem(GAME_SESSION_STORAGE_KEY, nextSnapshot)
+    window.localStorage.setItem(getSessionStorageKey(serializedSession.state.gameId, serializedSession.state.gameVersion), nextSnapshot)
   })
 
   return () => {
@@ -84,7 +91,8 @@ export function clearStoredGameSession() {
   }
 
   lastSavedSnapshot = ''
-  window.localStorage.removeItem(GAME_SESSION_STORAGE_KEY)
+  const state = useGameStore.getState()
+  window.localStorage.removeItem(getSessionStorageKey(state.activeGameId, state.activeGameVersion))
 }
 
 export function parseGameSessionFileContent(content: string): SerializedGameSession {

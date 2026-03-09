@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { useGameStore } from '../store'
+import { getGameDefinition } from '../games/registry'
 
 const MENU_OPTIONS = [
   { id: 'new-game', label: 'New Game', detail: 'Start a fresh setup' },
@@ -19,6 +21,8 @@ export function BoardMenu({ onStartNewGame, onExportState, onLoadState, onOpenKe
   const [isOpen, setIsOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const activeGameId = useGameStore((state) => state.activeGameId)
+  const activeGame = getGameDefinition(activeGameId)
 
   useEffect(() => {
     if (!isOpen) return
@@ -99,8 +103,8 @@ export function BoardMenu({ onStartNewGame, onExportState, onLoadState, onOpenKe
       {isOpen ? (
         <div className="board-menu__panel" role="menu" aria-label="Board actions">
           <div className="board-menu__header">
-            <span className="board-menu__eyebrow">Board</span>
-            <strong className="board-menu__title">Game Menu</strong>
+            <span className="board-menu__eyebrow">{activeGame.ui.menuEyebrow}</span>
+            <strong className="board-menu__title">{activeGame.ui.menuTitle}</strong>
           </div>
 
           <div className="board-menu__options">

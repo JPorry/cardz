@@ -1,9 +1,7 @@
 import * as THREE from 'three'
-import { BOARD_CONFIG } from '../config/board'
+import type { BoardConfig } from '../config/board'
 
-const STRIP_WIDTH = BOARD_CONFIG.width - BOARD_CONFIG.padding * 2 - 0.6
 const STRIP_DEPTH = 5.1
-const STRIP_CENTER_Z = -BOARD_CONFIG.depth / 2 - 3 + BOARD_CONFIG.padding + STRIP_DEPTH / 2 + 2.85
 const STRIP_CENTER_X = 0
 const STRIP_CENTER_Y = 4.5
 const STRIP_RENDER_ORDER_BASE = 10000
@@ -131,11 +129,13 @@ export class ExamineStrip3D {
   private currentTitle = 'Examine Stack'
   private shuffleEnabled = true
 
-  constructor() {
+  constructor(boardConfig: BoardConfig) {
+    const stripWidth = boardConfig.width - boardConfig.padding * 2 - 0.6
+    const stripCenterZ = -boardConfig.depth / 2 - 3 + boardConfig.padding + STRIP_DEPTH / 2 + 2.85
     this.group = new THREE.Group()
-    this.group.position.set(STRIP_CENTER_X, STRIP_CENTER_Y, STRIP_CENTER_Z)
+    this.group.position.set(STRIP_CENTER_X, STRIP_CENTER_Y, stripCenterZ)
 
-    const cardBackdropGeometry = new THREE.ShapeGeometry(createRoundedRectShape(STRIP_WIDTH, STRIP_DEPTH, 0.6))
+    const cardBackdropGeometry = new THREE.ShapeGeometry(createRoundedRectShape(stripWidth, STRIP_DEPTH, 0.6))
     cardBackdropGeometry.rotateX(-Math.PI / 2)
     this.geometries.push(cardBackdropGeometry)
     const cardBackdropMaterial = new THREE.MeshBasicMaterial({
@@ -152,7 +152,7 @@ export class ExamineStrip3D {
     this.group.add(this.cardBackdropMesh)
 
     const borderGeometry = new THREE.BufferGeometry().setFromPoints(
-      createRoundedRectPoints(STRIP_WIDTH, STRIP_DEPTH, 0.6, 12),
+      createRoundedRectPoints(stripWidth, STRIP_DEPTH, 0.6, 12),
     )
     this.geometries.push(borderGeometry)
     const borderMaterial = new THREE.LineBasicMaterial({
@@ -175,7 +175,7 @@ export class ExamineStrip3D {
     this.group.add(this.titleMesh)
 
     this.subtitleMesh = createTextPlane('0 cards', 3.2, 0.42, { fontSize: 68, color: '#d4dae8' })
-    this.subtitleMesh.position.set(-STRIP_WIDTH / 2 + 2.25, -0.035, -STRIP_DEPTH / 2 + 0.42)
+    this.subtitleMesh.position.set(-stripWidth / 2 + 2.25, -0.035, -STRIP_DEPTH / 2 + 0.42)
     this.subtitleMesh.renderOrder = STRIP_RENDER_ORDER_BASE + 2
     ;(this.subtitleMesh.material as THREE.MeshBasicMaterial).depthTest = false
     this.group.add(this.subtitleMesh)
@@ -187,7 +187,7 @@ export class ExamineStrip3D {
       color: '#212734',
       radius: 36,
     })
-    this.keepButtonMesh.position.set(STRIP_WIDTH / 2 - 6.95, -0.03, -STRIP_DEPTH / 2 + 0.42)
+    this.keepButtonMesh.position.set(stripWidth / 2 - 6.95, -0.03, -STRIP_DEPTH / 2 + 0.42)
     this.keepButtonMesh.renderOrder = STRIP_RENDER_ORDER_BASE + 3
     this.keepButtonMesh.userData = { examineButton: 'keep' satisfies ButtonKind }
     ;(this.keepButtonMesh.material as THREE.MeshBasicMaterial).depthTest = false
@@ -200,15 +200,16 @@ export class ExamineStrip3D {
       color: '#ffffff',
       radius: 36,
     })
-    this.shuffleButtonMesh.position.set(STRIP_WIDTH / 2 - 2.95, -0.03, -STRIP_DEPTH / 2 + 0.42)
+    this.shuffleButtonMesh.position.set(stripWidth / 2 - 2.95, -0.03, -STRIP_DEPTH / 2 + 0.42)
     this.shuffleButtonMesh.renderOrder = STRIP_RENDER_ORDER_BASE + 3
     this.shuffleButtonMesh.userData = { examineButton: 'shuffle' satisfies ButtonKind }
     ;(this.shuffleButtonMesh.material as THREE.MeshBasicMaterial).depthTest = false
     this.group.add(this.shuffleButtonMesh)
+    this.group.userData.stripWidth = stripWidth
   }
 
   get width() {
-    return STRIP_WIDTH
+    return this.group.userData.stripWidth as number
   }
 
   get depth() {
@@ -222,7 +223,7 @@ export class ExamineStrip3D {
   containsPoint(worldX: number, worldZ: number) {
     const localX = worldX - this.group.position.x
     const localZ = worldZ - this.group.position.z
-    return Math.abs(localX) <= STRIP_WIDTH / 2 && Math.abs(localZ) <= STRIP_DEPTH / 2
+    return Math.abs(localX) <= this.width / 2 && Math.abs(localZ) <= STRIP_DEPTH / 2
   }
 
   updateCardCount(cardCount: number) {

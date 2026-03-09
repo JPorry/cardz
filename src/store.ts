@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { INITIAL_LANES, INITIAL_REGIONS } from './utils/boardUtils'
 import {
   getAreaContentBounds,
   getTitleReservedSpace,
@@ -17,13 +16,14 @@ import {
   exportSerializedGameSession,
   type SerializedGameSession,
 } from './session'
+import { createInitialLanes, createInitialRegions } from './games/boardLayout'
+import { getDefaultGame, getGameDefinition } from './games/registry'
+import type { CardCounters, CardStatuses } from './games/types'
 import {
   clampCounterValue,
   createDefaultCardMetadata,
   type CardCounterKey,
-  type CardCounters,
   type CardStatusKey,
-  type CardStatuses,
 } from './utils/cardMetadata'
 
 export type CardLocation = 'deck' | 'hand' | 'table' | 'discard'
@@ -138,6 +138,9 @@ export interface RegionState {
 }
 
 export interface GameState {
+  activeGameId: string
+  activeGameVersion: number
+  gameSetupState: Record<string, unknown>
   cards: CardState[]
   decks: DeckState[]
   lanes: LaneState[]
@@ -172,6 +175,8 @@ export interface GameState {
   setHoveredCard: (id: string | null, x?: number | null, zone?: HoverCardZone | null) => void
   setPreviewCard: (id: string | null) => void
   setFocusedCard: (id: string | null) => void
+  setActiveGame: (gameId: string) => void
+  setGameSetupState: (updates: Record<string, unknown>) => void
   setCardCounter: (id: string, counter: CardCounterKey, value: number) => void
   adjustCardCounter: (id: string, counter: CardCounterKey, delta: number) => void
   toggleCardStatus: (id: string, status: CardStatusKey) => void
@@ -574,8 +579,11 @@ function shuffleArray<T>(items: T[]): T[] {
   return nextItems
 }
 
-function withCardMetadata(card: Omit<CardState, 'counters' | 'statuses'> & Partial<Pick<CardState, 'counters' | 'statuses'>>): CardState {
-  const defaults = createDefaultCardMetadata()
+function withCardMetadata(
+  card: Omit<CardState, 'counters' | 'statuses'> & Partial<Pick<CardState, 'counters' | 'statuses'>>,
+  gameId: string,
+): CardState {
+  const defaults = createDefaultCardMetadata(getGameDefinition(gameId).cardSemantics)
   return {
     ...card,
     ...defaults,
@@ -863,13 +871,29 @@ function createBoardLoadState(
 }
 
 function createFreshBoardLayout() {
+  const game = getDefaultGame()
+  const lanes = createInitialLanes(game.board.layout)
+  const regions = createInitialRegions(game.board.layout)
   return {
-    lanes: INITIAL_LANES.map((lane) => ({ ...lane, itemOrder: [] })),
-    regions: INITIAL_REGIONS.map((region) => ({ ...region, position: [...region.position] as [number, number, number] })),
+    lanes: lanes.map((lane) => ({ ...lane, itemOrder: [] })),
+    regions: regions.map((region) => ({ ...region, position: [...region.position] as [number, number, number] })),
+  }
+}
+
+function createFreshBoardLayoutForGame(gameId: string) {
+  const game = getGameDefinition(gameId)
+  const lanes = createInitialLanes(game.board.layout)
+  const regions = createInitialRegions(game.board.layout)
+  return {
+    lanes: lanes.map((lane) => ({ ...lane, itemOrder: [] })),
+    regions: regions.map((region) => ({ ...region, position: [...region.position] as [number, number, number] })),
   }
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
+  activeGameId: getDefaultGame().id,
+  activeGameVersion: getDefaultGame().version,
+  gameSetupState: getDefaultGame().setup.createInitialState(),
   ...createBoardLoadState(),
   gameInstanceId: 0,
   isDragging: false,
@@ -894,7 +918,31 @@ export const useGameStore = create<GameState>((set, get) => ({
   hoveredCardZone: null,
   previewCardId: null,
   focusedCardId: null,
-  beginBoardLoad: (label) => set(() => createBoardLoadState('preparing', label ?? 'Preparing new game...')),
+  setActiveGame: (gameId) => set((state) => {
+    const game = getGameDefinition(gameId)
+    const freshLayout = createFreshBoardLayoutForGame(game.id)
+    return {
+      activeGameId: game.id,
+      activeGameVersion: game.version,
+      gameSetupState: game.setup.createInitialState(),
+      cards: [],
+      decks: [],
+      ...freshLayout,
+      ...createTransientUiResetState(),
+      ...createBoardLoadState(),
+      gameInstanceId: state.gameInstanceId + 1,
+    }
+  }),
+  setGameSetupState: (updates) => set((state) => ({
+    gameSetupState: {
+      ...state.gameSetupState,
+      ...updates,
+    },
+  })),
+  beginBoardLoad: (label) => set((state) => {
+    const game = getGameDefinition(state.activeGameId)
+    return createBoardLoadState('preparing', label ?? game.ui.preparingNewGameLabel)
+  }),
   setBoardLoadPhase: (phase, label) =>
     set((state) => ({
       boardLoadPhase: phase,
@@ -1015,8 +1063,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   setHandPreview: (index, itemId) => set({ handPreviewIndex: index, handPreviewItemId: itemId }),
   cards: [],
   decks: [],
-  lanes: INITIAL_LANES.map(lane => ({ ...lane, itemOrder: [] })),
-  regions: INITIAL_REGIONS,
+  ...createFreshBoardLayout(),
   activeLaneId: null,
   activeRegionId: null,
   lanePreviewLaneId: null,
@@ -2107,7 +2154,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
   replaceBoardWithDecks: (setup) =>
     set((state) => {
-      const { lanes: freshLanes, regions: freshRegions } = createFreshBoardLayout()
+      const game = getGameDefinition(state.activeGameId)
+      const { lanes: freshLanes, regions: freshRegions } = createFreshBoardLayoutForGame(state.activeGameId)
       const playerDeckRegion = freshRegions.find((region) => region.id === 'region-player-deck')
       const mainSchemeRegion = freshRegions.find((region) => region.id === 'region-main-scheme')
       const villainDeckRegion = freshRegions.find((region) => region.id === 'region-villain-deck')
@@ -2254,6 +2302,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       ].filter((deck) => deck.cardIds.length > 0)
 
       return {
+        activeGameId: game.id,
+        activeGameVersion: game.version,
         cards: [
           ...preparedPlayerDeckCards,
           ...preparedPlayerAreaCards,
@@ -2262,7 +2312,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           ...preparedVillainAreaCards,
           ...preparedMainSchemeCards,
           ...preparedNemesisCards,
-        ].map((card) => withCardMetadata(card)),
+        ].map((card) => withCardMetadata(card, state.activeGameId)),
         decks: nextDecks,
         lanes: freshLanes.map((lane) => ({
           ...lane,
@@ -2273,7 +2323,7 @@ export const useGameStore = create<GameState>((set, get) => ({
               : [],
         })),
         regions: freshRegions,
-        ...createBoardLoadState('preparing', 'Dealing cards...'),
+        ...createBoardLoadState('preparing', game.ui.preparingNewGameLabel),
         gameInstanceId: state.gameInstanceId + 1,
         ...createTransientUiResetState(),
       }

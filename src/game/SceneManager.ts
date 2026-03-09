@@ -5,10 +5,9 @@ import { Table3D } from './Table3D';
 import { Lane3D } from './Lane3D';
 import { Region3D } from './Region3D';
 import { ExamineStrip3D } from './ExamineStrip3D';
-import { getCardBackUrl } from '../services/marvelCdb';
 import { CARD_WIDTH, getCardTableEuler, TABLE_CARD_SCALE } from '../utils/cardOrientation';
-import { BOARD_CONFIG } from '../config/board';
 import { getSelectionPreviewCardId } from '../utils/previewCards';
+import { getGameDefinition } from '../games/registry';
 
 const DRAG_PLANE_Y = 2.25;
 const HAND_DROP_THRESHOLD = -0.5;
@@ -121,6 +120,14 @@ export class SceneManager {
   baseCameraPos: THREE.Vector3 = new THREE.Vector3(0, 26, 8);
   targetCameraPos: THREE.Vector3 = new THREE.Vector3(0, 26, 8);
 
+  private get activeGame() {
+    return getGameDefinition(useGameStore.getState().activeGameId)
+  }
+
+  private get boardConfig() {
+    return this.activeGame.board.config
+  }
+
   constructor(container: HTMLDivElement) {
     this.isTouchDevice = this.detectTouchDevice()
     this.scene = new THREE.Scene();
@@ -153,9 +160,9 @@ export class SceneManager {
     this.addSceneLights(this.overlayScene);
 
     // Table
-    this.table = new Table3D();
+    this.table = new Table3D(this.boardConfig);
     this.scene.add(this.table.mesh);
-    this.examineStrip = new ExamineStrip3D();
+    this.examineStrip = new ExamineStrip3D(this.boardConfig);
     this.examineStrip.group.visible = false;
     this.overlayScene.add(this.examineStrip.group);
 
@@ -255,8 +262,8 @@ export class SceneManager {
   }
 
   private getProjectedBoardBoundsForScale(scale: number) {
-    const boardHalfWidth = BOARD_CONFIG.width / 2;
-    const boardHalfDepth = BOARD_CONFIG.depth / 2;
+    const boardHalfWidth = this.boardConfig.width / 2;
+    const boardHalfDepth = this.boardConfig.depth / 2;
     const boardCorners = [
       new THREE.Vector3(-boardHalfWidth, 0, TABLE_CENTER_Z - boardHalfDepth),
       new THREE.Vector3(boardHalfWidth, 0, TABLE_CENTER_Z - boardHalfDepth),
@@ -486,7 +493,7 @@ export class SceneManager {
     const card = store.cards.find((entry) => entry.id === cardId)
     if (
       !card
-      || (!card.faceUp && (!card.backArtworkUrl || card.backArtworkUrl === getCardBackUrl(card.typeCode)))
+      || (!card.faceUp && (!card.backArtworkUrl || card.backArtworkUrl === this.activeGame.cardPresentation.getDefaultCardBackUrl(card.typeCode)))
     ) {
       return null
     }
@@ -1012,7 +1019,7 @@ export class SceneManager {
           this.clearHandPreview();
           const lane = this.findLaneAtPosition(this.lastDragPos.x, this.lastDragPos.z);
           const region = this.findRegionAtPosition(this.lastDragPos.x, this.lastDragPos.z);
-          const hasConcreteTarget = Boolean(lane || dropTarget || region || BOARD_CONFIG.allowDirectTableCardDrop !== false)
+          const hasConcreteTarget = Boolean(lane || dropTarget || region || this.boardConfig.allowDirectTableCardDrop !== false)
 
           if (draggingExaminedCard && hasConcreteTarget) {
             store.removeCardFromExaminedStack(this.activeDragCardId)
@@ -1047,7 +1054,7 @@ export class SceneManager {
              store.dropSelectionIntoRegion([{ id: this.activeDragCardId, kind: 'card' }], region.id, false);
 	          } else {
              // Dropping outside any lane — remove from lane if it was in one
-             if (BOARD_CONFIG.allowDirectTableCardDrop === false) {
+             if (this.boardConfig.allowDirectTableCardDrop === false) {
                this.restoreDraggedCardOrigin();
 	             } else {
 	               store.removeFromLane(this.activeDragCardId);
@@ -1700,7 +1707,7 @@ export class SceneManager {
         return
       }
 
-      if (BOARD_CONFIG.allowDirectTableCardDrop === false) {
+      if (this.boardConfig.allowDirectTableCardDrop === false) {
         this.restoreGroupDragOrigins()
         return
       }
@@ -1723,7 +1730,7 @@ export class SceneManager {
       return
     }
 
-    if (BOARD_CONFIG.allowDirectTableCardDrop === false) {
+    if (this.boardConfig.allowDirectTableCardDrop === false) {
       this.restoreGroupDragOrigins()
       return
     }
@@ -1759,7 +1766,7 @@ export class SceneManager {
         store.addCardToDeck(item.id, dropTarget.id)
       } else if (region) {
         this.dropSelectionIntoRegion([item], region.id)
-      } else if (BOARD_CONFIG.allowDirectTableCardDrop === false) {
+      } else if (this.boardConfig.allowDirectTableCardDrop === false) {
         this.restoreGroupDragOrigins()
       } else {
         store.removeFromLane(item.id)
@@ -2256,6 +2263,36 @@ export class SceneManager {
 
   private handleGameInstanceReset(state: GameState) {
     this.clearCardInstances()
+    for (const lane of this.lanes.values()) {
+      this.scene.remove(lane.group)
+      lane.dispose()
+    }
+    this.lanes.clear()
+    for (const region of this.regions.values()) {
+      this.scene.remove(region.group)
+      region.dispose()
+    }
+    this.regions.clear()
+    this.scene.remove(this.table.mesh)
+    this.overlayScene.remove(this.examineStrip.group)
+    this.table.dispose()
+    this.examineStrip.dispose()
+    this.table = new Table3D(this.boardConfig)
+    this.scene.add(this.table.mesh)
+    this.examineStrip = new ExamineStrip3D(this.boardConfig)
+    this.examineStrip.group.visible = false
+    this.overlayScene.add(this.examineStrip.group)
+    for (const laneData of state.lanes) {
+      const lane3D = new Lane3D(laneData)
+      this.lanes.set(laneData.id, lane3D)
+      this.scene.add(lane3D.group)
+    }
+    for (const regionData of state.regions) {
+      const region3D = new Region3D(regionData)
+      this.regions.set(regionData.id, region3D)
+      this.scene.add(region3D.group)
+    }
+    this.fitCameraToBoard({ snap: true })
     this.lastGameInstanceId = state.gameInstanceId
     this.previousExaminedCardIds = new Set()
     this.hoveredTargetId = null
@@ -2335,7 +2372,7 @@ export class SceneManager {
       const c3d = this.cards.get(data.id);
       if (c3d) {
         this.setCardSceneMembership(data.id, Boolean(state.examinedStack?.cardOrder.includes(data.id)))
-        c3d.refreshArtwork(data.artworkUrl, data.backArtworkUrl ?? getCardBackUrl(data.typeCode));
+        c3d.refreshArtwork(data.artworkUrl, data.backArtworkUrl ?? this.activeGame.cardPresentation.getDefaultCardBackUrl(data.typeCode));
         const deck = state.decks.find((entry) => entry.cardIds.includes(data.id))
         const showOnTopOfDeck = Boolean(
           deck
@@ -2344,7 +2381,7 @@ export class SceneManager {
             data.faceUp
             || (
               Boolean(data.backArtworkUrl)
-              && data.backArtworkUrl !== getCardBackUrl(data.typeCode)
+              && data.backArtworkUrl !== this.activeGame.cardPresentation.getDefaultCardBackUrl(data.typeCode)
             )
           ),
         )

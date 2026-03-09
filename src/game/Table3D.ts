@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BOARD_CONFIG } from '../config/board';
+import type { BoardConfig } from '../config/board';
 
 function createRoundedRectShape(width: number, depth: number, radius: number) {
   const shape = new THREE.Shape();
@@ -52,9 +52,9 @@ export class Table3D {
   private materials: THREE.Material[] = [];
   private geometries: THREE.BufferGeometry[] = [];
 
-  constructor() {
-    const width = BOARD_CONFIG.width;
-    const depth = BOARD_CONFIG.depth;
+  constructor(boardConfig: BoardConfig) {
+    const width = boardConfig.width;
+    const depth = boardConfig.depth;
     const thickness = 4.4;
     const cornerRadius = 1.7;
     const bevelSize = 0.1;

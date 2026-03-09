@@ -1,17 +1,14 @@
 import { useEffect, type PointerEvent as ReactPointerEvent } from 'react'
-import {
-  BOARD_SHORTCUTS,
-  HOVERED_CARD_COUNTER_SHORTCUTS,
-  HOVERED_CARD_STATUS_SHORTCUTS,
-  type ShortcutReferenceItem,
-} from '../config/shortcuts'
+import { useGameStore } from '../store'
+import { getGameDefinition } from '../games/registry'
+import type { GameShortcutDefinition } from '../games/types'
 
 type KeyboardShortcutsModalProps = {
   isOpen: boolean
   onClose: () => void
 }
 
-function ShortcutSection({ title, eyebrow, items }: { title: string, eyebrow: string, items: ShortcutReferenceItem[] }) {
+function ShortcutSection({ title, eyebrow, items }: { title: string, eyebrow: string, items: GameShortcutDefinition[] }) {
   return (
     <section className="keyboard-shortcuts__section" aria-labelledby={`${eyebrow}-title`}>
       <div className="keyboard-shortcuts__section-header">
@@ -35,6 +32,8 @@ function ShortcutSection({ title, eyebrow, items }: { title: string, eyebrow: st
 }
 
 export function KeyboardShortcutsModal({ isOpen, onClose }: KeyboardShortcutsModalProps) {
+  const activeGameId = useGameStore((state) => state.activeGameId)
+  const activeGame = getGameDefinition(activeGameId)
   useEffect(() => {
     if (!isOpen) return
 
@@ -69,7 +68,7 @@ export function KeyboardShortcutsModal({ isOpen, onClose }: KeyboardShortcutsMod
         <div className="keyboard-shortcuts-modal__header">
           <div>
             <span className="keyboard-shortcuts-modal__eyebrow">Reference</span>
-            <h2 id="keyboard-shortcuts-title" className="keyboard-shortcuts-modal__title">Keyboard Shortcuts</h2>
+            <h2 id="keyboard-shortcuts-title" className="keyboard-shortcuts-modal__title">{activeGame.ui.keyboardShortcutsTitle}</h2>
           </div>
           <button
             type="button"
@@ -83,11 +82,11 @@ export function KeyboardShortcutsModal({ isOpen, onClose }: KeyboardShortcutsMod
 
         <div className="keyboard-shortcuts-modal__body">
           <p className="keyboard-shortcuts-modal__intro">
-            Shortcuts are disabled while a text field, button, or modal is focused. Counter shortcuts only work on a visible hovered card.
+            {activeGame.ui.keyboardShortcutsIntro}
           </p>
-          <ShortcutSection eyebrow="Board" title="Board actions" items={BOARD_SHORTCUTS} />
-          <ShortcutSection eyebrow="Counters" title="Hovered card counters" items={HOVERED_CARD_COUNTER_SHORTCUTS} />
-          <ShortcutSection eyebrow="Statuses" title="Hovered card statuses" items={HOVERED_CARD_STATUS_SHORTCUTS} />
+          {activeGame.shortcuts.sections.map((section) => (
+            <ShortcutSection key={section.eyebrow} eyebrow={section.eyebrow} title={section.title} items={section.items} />
+          ))}
         </div>
       </div>
     </div>
