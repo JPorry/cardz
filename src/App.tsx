@@ -19,6 +19,8 @@ function App() {
   const [isNewGameOpen, setIsNewGameOpen] = useState(false)
   const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false)
   const isExaminingStack = useGameStore((state) => state.examinedStack !== null)
+  const boardLoadPhase = useGameStore((state) => state.boardLoadPhase)
+  const boardLoadingLabel = useGameStore((state) => state.boardLoadingLabel)
 
   useEffect(() => {
     bootstrapStoredGameSession()
@@ -70,6 +72,12 @@ function App() {
         onOpenKeyboardShortcuts={() => setIsKeyboardShortcutsOpen(true)}
       />
       <BoardShortcuts disabled={isNewGameOpen || isExaminingStack || isKeyboardShortcutsOpen} />
+      {boardLoadPhase !== 'idle' ? (
+        <div className="board-loading-indicator" role="status" aria-live="polite">
+          <span className="board-loading-indicator__dot" aria-hidden="true" />
+          <span>{boardLoadingLabel ?? (boardLoadPhase === 'preparing' ? 'Preparing board...' : 'Finishing setup...')}</span>
+        </div>
+      ) : null}
       <SelectionOverlay />
       <CardPreview />
       <NewGameModal isOpen={isNewGameOpen} onClose={() => setIsNewGameOpen(false)} />

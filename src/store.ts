@@ -29,6 +29,7 @@ import {
 export type CardLocation = 'deck' | 'hand' | 'table' | 'discard'
 export type SelectionKind = 'card' | 'deck'
 export type DeckKind = 'stack' | 'sequence'
+export type BoardLoadPhase = 'idle' | 'preparing' | 'settling'
 export type { TitlePosition }
 export interface SelectionItem {
   id: string
@@ -141,6 +142,9 @@ export interface GameState {
   decks: DeckState[]
   lanes: LaneState[]
   regions: RegionState[]
+  boardLoadPhase: BoardLoadPhase
+  boardLoadingLabel: string | null
+  gameInstanceId: number
   examinedStack: ExaminedStackState | null
   selectedItems: SelectionItem[]
   draggedSelectionItems: SelectionItem[]
@@ -161,6 +165,9 @@ export interface GameState {
   hoveredCardZone: HoverCardZone | null
   previewCardId: string | null
   focusedCardId: string | null
+  beginBoardLoad: (label?: string) => void
+  setBoardLoadPhase: (phase: BoardLoadPhase, label?: string | null) => void
+  finishBoardLoad: () => void
   setDragging: (dragging: boolean, type?: 'card' | 'deck' | null, id?: string | null) => void
   setHoveredCard: (id: string | null, x?: number | null, zone?: HoverCardZone | null) => void
   setPreviewCard: (id: string | null) => void
@@ -845,6 +852,16 @@ function createTransientUiResetState() {
   }
 }
 
+function createBoardLoadState(
+  phase: BoardLoadPhase = 'idle',
+  label: string | null = null,
+) {
+  return {
+    boardLoadPhase: phase,
+    boardLoadingLabel: label,
+  }
+}
+
 function createFreshBoardLayout() {
   return {
     lanes: INITIAL_LANES.map((lane) => ({ ...lane, itemOrder: [] })),
@@ -853,6 +870,8 @@ function createFreshBoardLayout() {
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
+  ...createBoardLoadState(),
+  gameInstanceId: 0,
   isDragging: false,
   activeDragType: null,
   draggedCardId: null,
@@ -875,6 +894,13 @@ export const useGameStore = create<GameState>((set, get) => ({
   hoveredCardZone: null,
   previewCardId: null,
   focusedCardId: null,
+  beginBoardLoad: (label) => set(() => createBoardLoadState('preparing', label ?? 'Preparing new game...')),
+  setBoardLoadPhase: (phase, label) =>
+    set((state) => ({
+      boardLoadPhase: phase,
+      boardLoadingLabel: label === undefined ? state.boardLoadingLabel : label,
+    })),
+  finishBoardLoad: () => set(() => createBoardLoadState()),
   setDragging: (dragging, type = null) => 
     set((state) => ({ 
       isDragging: dragging, 
@@ -2080,7 +2106,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     })
   },
   replaceBoardWithDecks: (setup) =>
-    set(() => {
+    set((state) => {
       const { lanes: freshLanes, regions: freshRegions } = createFreshBoardLayout()
       const playerDeckRegion = freshRegions.find((region) => region.id === 'region-player-deck')
       const mainSchemeRegion = freshRegions.find((region) => region.id === 'region-main-scheme')
@@ -2247,10 +2273,16 @@ export const useGameStore = create<GameState>((set, get) => ({
               : [],
         })),
         regions: freshRegions,
+        ...createBoardLoadState('preparing', 'Dealing cards...'),
+        gameInstanceId: state.gameInstanceId + 1,
         ...createTransientUiResetState(),
       }
     }),
   exportGameSession: () => exportSerializedGameSession(get()),
-  importGameSession: (session) => set(() => createImportedGameState(session)),
+  importGameSession: (session) => set((state) => ({
+    ...createImportedGameState(session),
+    ...createBoardLoadState('preparing', 'Loading saved game...'),
+    gameInstanceId: state.gameInstanceId + 1,
+  })),
 
 }))

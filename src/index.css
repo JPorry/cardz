@@ -140,6 +140,47 @@ button {
   color: rgba(247, 241, 230, 0.72);
 }
 
+.board-loading-indicator {
+  position: fixed;
+  top: max(18px, env(safe-area-inset-top));
+  left: 50%;
+  z-index: 1650;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(14, 18, 26, 0.86);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(16px);
+  color: #fff8ec;
+  font-size: 0.92rem;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.board-loading-indicator__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #ffda8a;
+  box-shadow: 0 0 0 6px rgba(255, 218, 138, 0.16);
+  animation: board-loading-pulse 1s ease-in-out infinite;
+}
+
+@keyframes board-loading-pulse {
+  0%, 100% {
+    transform: scale(0.9);
+    opacity: 0.8;
+  }
+
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}
+
 .selection-marquee {
   position: fixed;
   z-index: 1500;
@@ -267,7 +308,8 @@ button {
   color: rgba(247, 241, 230, 0.88);
 }
 
-.new-game-modal__field select {
+.new-game-modal__field select,
+.new-game-modal__field input {
   width: 100%;
   min-height: 46px;
   padding: 0 14px;
@@ -275,6 +317,57 @@ button {
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.06);
   color: #fff8ec;
+}
+
+.new-game-modal__field input::placeholder {
+  color: rgba(247, 241, 230, 0.42);
+}
+
+.new-game-modal__segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.new-game-modal__segment {
+  min-height: 46px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(247, 241, 230, 0.88);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.new-game-modal__segment:hover,
+.new-game-modal__segment:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.new-game-modal__segment:active {
+  transform: scale(0.98);
+}
+
+.new-game-modal__segment--active {
+  border-color: rgba(211, 71, 47, 0.72);
+  background: rgba(211, 71, 47, 0.22);
+  color: #fff8ec;
+}
+
+.new-game-modal__status {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: rgba(247, 241, 230, 0.68);
+}
+
+.new-game-modal__status--success {
+  color: #d7ffd9;
+}
+
+.new-game-modal__status--error {
+  color: #ffd4d4;
 }
 
 .new-game-modal__toggle {
@@ -349,7 +442,9 @@ button {
 .new-game-modal__secondary:disabled,
 .new-game-modal__primary:disabled,
 .new-game-modal__field select:disabled,
-.new-game-modal__toggle input:disabled {
+.new-game-modal__field input:disabled,
+.new-game-modal__toggle input:disabled,
+.new-game-modal__segment:disabled {
   cursor: default;
   opacity: 0.65;
 }

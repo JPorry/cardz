@@ -114,6 +114,8 @@ export class SceneManager {
   private selectionBoundsDirty = true;
   private cameraDirty = true;
   private lastSelectionSignature = '';
+  private lastGameInstanceId = 0;
+  private lastHandledBoardLoadGameInstanceId = -1;
   private readonly isTouchDevice: boolean;
 
   baseCameraPos: THREE.Vector3 = new THREE.Vector3(0, 26, 8);
@@ -159,6 +161,7 @@ export class SceneManager {
 
     // Initial load from store
     const storeState = useGameStore.getState();
+    this.lastGameInstanceId = storeState.gameInstanceId;
     
     // Create lanes from store
     for (const laneData of storeState.lanes) {
@@ -2240,7 +2243,72 @@ export class SceneManager {
     }
   }
 
+  private clearCardInstances() {
+    for (const [, card3D] of this.cards) {
+      this.scene.remove(card3D.group)
+      this.scene.remove(card3D.ghostGroup)
+      this.overlayScene.remove(card3D.group)
+      this.overlayScene.remove(card3D.ghostGroup)
+      card3D.dispose()
+    }
+    this.cards.clear()
+  }
+
+  private handleGameInstanceReset(state: GameState) {
+    this.clearCardInstances()
+    this.lastGameInstanceId = state.gameInstanceId
+    this.previousExaminedCardIds = new Set()
+    this.hoveredTargetId = null
+    this.hoveredTargetType = null
+    this.draggedCardOrigin = null
+    this.pendingSelectionItem = null
+    this.pendingSelectionItems = []
+    this.pendingCardId = null
+    this.isPendingMarquee = false
+    this.isMarqueeSelecting = false
+    this.isGroupDrag = false
+    this.dragSelectionEntries = []
+    this.dragOrigins = []
+    this.lastSelectionBoundsKey = null
+    this.lastSelectionSignature = ''
+  }
+
+  private startNewGameSettle(state: GameState) {
+    const cardToDeckMap = new Map<string, DeckState>()
+    for (const deck of state.decks) {
+      for (const cardId of deck.cardIds) {
+        cardToDeckMap.set(cardId, deck)
+      }
+    }
+
+    for (const cardData of state.cards) {
+      const card3D = this.cards.get(cardData.id)
+      if (!card3D) continue
+
+      card3D.updateTransform()
+      const deck = cardToDeckMap.get(cardData.id)
+      const shouldAnimate = cardData.location === 'table'
+        || cardData.location === 'hand'
+        || (deck ? getDeckTopCardId(deck) === cardData.id : false)
+
+      if (shouldAnimate) {
+        card3D.startSettleAnimation()
+      }
+    }
+
+    if (state.boardLoadPhase === 'preparing') {
+      useGameStore.getState().setBoardLoadPhase('settling', 'Finishing setup...')
+    }
+  }
+
   private sync(state: GameState) {
+    const gameInstanceChanged = state.gameInstanceId !== this.lastGameInstanceId
+    const shouldHandleBoardLoad = state.boardLoadPhase !== 'idle'
+      && state.gameInstanceId !== this.lastHandledBoardLoadGameInstanceId
+    if (gameInstanceChanged) {
+      this.handleGameInstanceReset(state)
+    }
+
     const nextExaminedCardIds = new Set(state.examinedStack?.cardOrder ?? [])
     const newlyExaminedCardIds = [...nextExaminedCardIds].filter((cardId) => !this.previousExaminedCardIds.has(cardId))
 
@@ -2295,6 +2363,11 @@ export class SceneManager {
     this.layoutDirty = true
     this.selectionBoundsDirty = true
     this.updateLayout(state);
+
+    if (shouldHandleBoardLoad) {
+      this.startNewGameSettle(state)
+      this.lastHandledBoardLoadGameInstanceId = state.gameInstanceId
+    }
 
     newlyExaminedCardIds.forEach((cardId) => {
       const card3D = this.cards.get(cardId)
@@ -2396,8 +2469,9 @@ export class SceneManager {
          }
       }
 
-      const wiggleRot = isHoveredTarget ? Math.sin(performance.now() * 0.025) * 0.1 : 0;
-      const lift = isHoveredTarget ? 0.05 : 0; // slight lift on hover
+      const allowHoverAnimation = state.boardLoadPhase === 'idle'
+      const wiggleRot = isHoveredTarget && allowHoverAnimation ? Math.sin(performance.now() * 0.025) * 0.1 : 0;
+      const lift = isHoveredTarget && allowHoverAnimation ? 0.05 : 0; // slight lift on hover
 
       const examinedPosition = this.getExaminedCardPosition(cardData.id)
       if (examinedPosition) {
@@ -2649,6 +2723,11 @@ export class SceneManager {
     }
     if (this.selectionBoundsDirty) {
       this.updateSelectionBounds()
+    }
+
+    const loadPhase = useGameStore.getState().boardLoadPhase
+    if (loadPhase === 'settling' && !hasActiveAnimations && !this.layoutDirty && !this.cameraDirty) {
+      useGameStore.getState().finishBoardLoad()
     }
     return hasActiveAnimations;
   }

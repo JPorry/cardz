@@ -13,6 +13,11 @@ const OVERLAY_TEXTURE_HEIGHT = 768;
 const OVERLAY_PLANE_WIDTH = CARD_WIDTH * 0.94;
 const OVERLAY_PLANE_HEIGHT = CARD_HEIGHT * 0.94;
 const OVERLAY_OFFSET = CARD_THICKNESS / 2 + 0.02;
+const PLACEHOLDER_FRONT_COLOR = new THREE.Color(0xd8d1c4);
+const PLACEHOLDER_BACK_COLOR = new THREE.Color(0x566072);
+const SHARED_TEXTURE_LOADER = new THREE.TextureLoader();
+
+SHARED_TEXTURE_LOADER.setCrossOrigin('anonymous');
 
 export class Card3D {
   id: string;
@@ -62,6 +67,8 @@ export class Card3D {
     this.basePosition = new THREE.Vector3();
     
     this.setupMeshes();
+    this.resetArtworkMaterial(this.frontMat, 'front');
+    this.resetArtworkMaterial(this.backMat, 'back');
     this.setupGhostMeshes();
     this.selectionMesh = this.createSelectionMesh()
     this.selectionMaterial = this.selectionMesh.material as THREE.MeshBasicMaterial
@@ -90,6 +97,52 @@ export class Card3D {
     this.group.userData = { cardId: this.id, isCard: true };
     this.group.children.forEach(c => c.userData = this.group.userData);
 
+  }
+
+  private resetArtworkMaterial(
+    material: THREE.MeshStandardMaterial | undefined,
+    face: 'front' | 'back',
+  ) {
+    if (!material) return;
+    material.map?.dispose();
+    material.map = null;
+    material.color.copy(face === 'front' ? PLACEHOLDER_FRONT_COLOR : PLACEHOLDER_BACK_COLOR);
+    material.needsUpdate = true;
+  }
+
+  private applyLoadedTexture(
+    material: THREE.MeshStandardMaterial | undefined,
+    texture: THREE.Texture,
+    face: 'front' | 'back',
+  ) {
+    if (!material) {
+      texture.dispose();
+      return;
+    }
+
+    material.map?.dispose();
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = 4;
+    const rotation = this.getTextureRotation(texture, face === 'back');
+    if (face === 'front') {
+      this.currentArtworkRotation = rotation;
+    } else {
+      this.currentBackArtworkRotation = rotation;
+    }
+    this.applyTextureRotation(texture, rotation);
+    material.map = texture;
+    material.color.set(0xffffff);
+    material.needsUpdate = true;
+  }
+
+  startSettleAnimation() {
+    this.basePosition.copy(this.targetPosition);
+    this.basePosition.y += 0.35;
+    this.group.position.copy(this.basePosition);
+    this.group.quaternion.copy(this.targetQuaternion);
+    this.group.scale.copy(this.targetScale).multiplyScalar(1.015);
   }
 
   private createRoundedRectShape(width: number, height: number, radius: number): THREE.Shape {
@@ -206,68 +259,36 @@ export class Card3D {
   }
 
   refreshArtwork(artworkUrl?: string, backArtworkUrl?: string) {
-    if (!artworkUrl && this.frontMat?.map) {
-      this.frontMat.map.dispose()
-      this.frontMat.map = null
-      this.currentArtworkUrl = undefined
-      this.frontMat.needsUpdate = true
-    }
-    if (artworkUrl && artworkUrl !== this.currentArtworkUrl) {
+    if (artworkUrl !== this.currentArtworkUrl) {
       this.currentArtworkUrl = artworkUrl;
       const requestVersion = ++this.frontTextureLoadVersion;
-      const loader = new THREE.TextureLoader();
-      loader.setCrossOrigin('anonymous');
-      loader.load(artworkUrl, (texture) => {
+      this.resetArtworkMaterial(this.frontMat, 'front');
+      if (artworkUrl) {
+        SHARED_TEXTURE_LOADER.load(artworkUrl, (texture) => {
         if (!this.frontMat || requestVersion !== this.frontTextureLoadVersion || artworkUrl !== this.currentArtworkUrl) {
           texture.dispose();
           return;
         }
 
-        if (this.frontMat) {
-          this.frontMat.map?.dispose();
-          texture.colorSpace = THREE.SRGBColorSpace;
-          texture.minFilter = THREE.LinearFilter;
-          texture.magFilter = THREE.LinearFilter;
-          texture.anisotropy = 4;
-          this.currentArtworkRotation = this.getTextureRotation(texture, false);
-          this.applyTextureRotation(texture, this.currentArtworkRotation);
-          this.frontMat.map = texture;
-          this.frontMat.color.set(0xffffff); // Ensure it's white to show texture clearly
-          this.frontMat.needsUpdate = true;
-        }
-      });
+          this.applyLoadedTexture(this.frontMat, texture, 'front');
+        });
+      }
     }
 
-    if (!backArtworkUrl && this.backMat?.map) {
-      this.backMat.map.dispose()
-      this.backMat.map = null
-      this.currentBackArtworkUrl = undefined
-      this.backMat.needsUpdate = true
-    }
-    if (backArtworkUrl && backArtworkUrl !== this.currentBackArtworkUrl) {
+    if (backArtworkUrl !== this.currentBackArtworkUrl) {
       this.currentBackArtworkUrl = backArtworkUrl;
       const requestVersion = ++this.backTextureLoadVersion;
-      const loader = new THREE.TextureLoader();
-      loader.setCrossOrigin('anonymous');
-      loader.load(backArtworkUrl, (texture) => {
+      this.resetArtworkMaterial(this.backMat, 'back');
+      if (backArtworkUrl) {
+        SHARED_TEXTURE_LOADER.load(backArtworkUrl, (texture) => {
         if (!this.backMat || requestVersion !== this.backTextureLoadVersion || backArtworkUrl !== this.currentBackArtworkUrl) {
           texture.dispose();
           return;
         }
 
-        if (this.backMat) {
-          this.backMat.map?.dispose();
-          texture.colorSpace = THREE.SRGBColorSpace;
-          texture.minFilter = THREE.LinearFilter;
-          texture.magFilter = THREE.LinearFilter;
-          texture.anisotropy = 4;
-          this.currentBackArtworkRotation = this.getTextureRotation(texture, true);
-          this.applyTextureRotation(texture, this.currentBackArtworkRotation);
-          this.backMat.map = texture;
-          this.backMat.color.set(0xffffff); // Ensure it's white to show texture clearly
-          this.backMat.needsUpdate = true;
-        }
-      });
+          this.applyLoadedTexture(this.backMat, texture, 'back');
+        });
+      }
     }
   }
 

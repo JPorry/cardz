@@ -12,8 +12,25 @@ interface DecklistResponse {
   slots: Record<string, number>
 }
 
+export interface ResolvedHeroDeck {
+  deckId: number
+  deckName: string
+  heroCode: string
+  heroName: string
+}
+
+export type HeroSelection =
+  | {
+    source: 'precon'
+    hero: HeroDeckReference
+  }
+  | {
+    source: 'custom'
+    deck: ResolvedHeroDeck
+  }
+
 interface GameSetupSelection {
-  hero: HeroDeckReference
+  hero: HeroSelection
   villain: CardSetReference
   modular: CardSetReference
   difficulty: CardSetReference
@@ -42,6 +59,24 @@ async function fetchJson<T>(url: string): Promise<T> {
 
 async function fetchDecklist(deckId: number): Promise<DecklistResponse> {
   return fetchJson<DecklistResponse>(`${API_BASE_URL}/decklist/${deckId}`)
+}
+
+export async function resolveDecklist(deckId: number): Promise<ResolvedHeroDeck> {
+  if (!Number.isInteger(deckId) || deckId <= 0) {
+    throw new Error('Deck ID must be a positive number.')
+  }
+
+  const decklist = await fetchDecklist(deckId)
+  if (!decklist.hero_code || !decklist.hero_name) {
+    throw new Error(`Deck ${decklist.name} is missing hero information.`)
+  }
+
+  return {
+    deckId: decklist.id,
+    deckName: decklist.name,
+    heroCode: decklist.hero_code,
+    heroName: decklist.hero_name,
+  }
 }
 
 async function fetchCard(cardCode: string): Promise<MarvelCard> {
@@ -151,9 +186,12 @@ function shuffleCards(cards: CardState[]): CardState[] {
 }
 
 async function buildHeroSetup(
-  hero: HeroDeckReference,
-): Promise<{ heroCards: CardState[]; heroCard: MarvelCard }> {
-  const decklist = await fetchDecklist(hero.deckId)
+  heroSelection: HeroSelection,
+): Promise<{ heroCards: CardState[]; heroCard: MarvelCard; resolvedDeck: ResolvedHeroDeck }> {
+  const resolvedDeck = heroSelection.source === 'precon'
+    ? await resolveDecklist(heroSelection.hero.deckId)
+    : heroSelection.deck
+  const decklist = await fetchDecklist(resolvedDeck.deckId)
   const uniqueCodes = [decklist.hero_code, ...Object.keys(decklist.slots)]
   const uniqueCardPromises = uniqueCodes.map((cardCode) => fetchCard(cardCode))
   const fetchedCards = await Promise.all(uniqueCardPromises)
@@ -183,6 +221,7 @@ async function buildHeroSetup(
         : normalizeCard(card, 'hero-card', index)
     )),
     heroCard,
+    resolvedDeck,
   }
 }
 
@@ -261,7 +300,7 @@ async function buildHeroObligations(heroCard: MarvelCard): Promise<CardState[]> 
 }
 
 export async function prepareGameSetup(selection: GameSetupSelection): Promise<PreparedGameSetup> {
-  const [{ heroCards, heroCard }, encounterCards] = await Promise.all([
+  const [{ heroCards, heroCard, resolvedDeck }, encounterCards] = await Promise.all([
     buildHeroSetup(selection.hero),
     buildEncounterDeck(selection.villain, selection.modular, selection.difficulty),
   ])
@@ -326,7 +365,7 @@ export async function prepareGameSetup(selection: GameSetupSelection): Promise<P
     mainSchemeSequenceCards,
     nemesisDeckCards: nemesisCards,
     selection: {
-      heroName: selection.hero.name,
+      heroName: resolvedDeck.deckName,
       villainName: selection.villain.name,
       modularName: selection.modular.name,
       difficultyName: selection.difficulty.name,
