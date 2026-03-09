@@ -166,6 +166,7 @@ export interface GameState {
   hoveredCardId: string | null
   hoveredCardScreenX: number | null
   hoveredCardZone: HoverCardZone | null
+  touchQuickPreviewCardId: string | null
   previewCardId: string | null
   focusedCardId: string | null
   beginBoardLoad: (label?: string) => void
@@ -173,6 +174,8 @@ export interface GameState {
   finishBoardLoad: () => void
   setDragging: (dragging: boolean, type?: 'card' | 'deck' | null, id?: string | null) => void
   setHoveredCard: (id: string | null, x?: number | null, zone?: HoverCardZone | null) => void
+  setTouchQuickPreviewCard: (id: string | null) => void
+  clearTouchQuickPreview: () => void
   setPreviewCard: (id: string | null) => void
   setFocusedCard: (id: string | null) => void
   setActiveGame: (gameId: string) => void
@@ -537,12 +540,7 @@ function applyFaceStateFromContainer<T extends { faceUp: boolean }>(
 }
 
 function normalizeCardForDeck<T extends CardState>(card: T): T {
-  return card.tapped ? { ...card, tapped: false } : card
-}
-
-function normalizeCardsForDeck(cardIds: string[], cards: CardState[]): CardState[] {
-  const cardIdSet = new Set(cardIds)
-  return cards.map((card) => (cardIdSet.has(card.id) ? normalizeCardForDeck(card) : card))
+  return card
 }
 
 function selectionItemsEqual(a: SelectionItem, b: SelectionItem): boolean {
@@ -840,6 +838,7 @@ function createTransientUiResetState() {
     hoveredCardId: null,
     hoveredCardScreenX: null,
     hoveredCardZone: null,
+    touchQuickPreviewCardId: null,
     previewCardId: null,
     focusedCardId: null,
     examinedStack: null,
@@ -916,6 +915,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   hoveredCardId: null,
   hoveredCardScreenX: null,
   hoveredCardZone: null,
+  touchQuickPreviewCardId: null,
   previewCardId: null,
   focusedCardId: null,
   setActiveGame: (gameId) => set((state) => {
@@ -957,13 +957,19 @@ export const useGameStore = create<GameState>((set, get) => ({
       hoveredCardId: dragging ? null : state.hoveredCardId,
       hoveredCardScreenX: dragging ? null : state.hoveredCardScreenX,
       hoveredCardZone: dragging ? null : state.hoveredCardZone,
+      touchQuickPreviewCardId: dragging ? null : state.touchQuickPreviewCardId,
     })),
   setHoveredCard: (id, x, zone) => set({
     hoveredCardId: id,
     hoveredCardScreenX: x ?? null,
     hoveredCardZone: id ? zone ?? null : null,
   }),
-  setPreviewCard: (id) => set({ previewCardId: id }),
+  setTouchQuickPreviewCard: (id) => set({ touchQuickPreviewCardId: id }),
+  clearTouchQuickPreview: () => set({ touchQuickPreviewCardId: null }),
+  setPreviewCard: (id) => set((state) => ({
+    previewCardId: id,
+    touchQuickPreviewCardId: id ? null : state.touchQuickPreviewCardId,
+  })),
   setFocusedCard: (id) => set({ focusedCardId: id }),
   setCardCounter: (id, counter, value) => set((state) => ({
     cards: state.cards.map((card) => (
@@ -1017,16 +1023,17 @@ export const useGameStore = create<GameState>((set, get) => ({
         : card
     )),
   })),
-  setSelectedItems: (items) => set({ selectedItems: upsertSelectionItems(items) }),
+  setSelectedItems: (items) => set({ selectedItems: upsertSelectionItems(items), touchQuickPreviewCardId: null }),
   setDraggedSelectionItems: (items) => set({ draggedSelectionItems: upsertSelectionItems(items) }),
   setDragTargetContext: (context) => set({ dragTargetContext: context ? { ...context } : null }),
-  selectOnly: (item) => set({ selectedItems: item ? [item] : [] }),
+  selectOnly: (item) => set({ selectedItems: item ? [item] : [], touchQuickPreviewCardId: null }),
   toggleSelection: (item) => set((state) => ({
     selectedItems: state.selectedItems.some((entry) => selectionItemsEqual(entry, item))
       ? state.selectedItems.filter((entry) => !selectionItemsEqual(entry, item))
       : [...state.selectedItems, item],
+    touchQuickPreviewCardId: null,
   })),
-  clearSelection: () => set({ selectedItems: [], selectionBounds: null }),
+  clearSelection: () => set({ selectedItems: [], selectionBounds: null, touchQuickPreviewCardId: null }),
   setSelectionBounds: (bounds) => set({ selectionBounds: bounds }),
   startMarqueeSelection: (x, y, additive) => set({
     marqueeSelection: {
@@ -1809,7 +1816,17 @@ export const useGameStore = create<GameState>((set, get) => ({
       const targetDeck = state.decks.find(d => d.id === targetDeckId)
       if (!sourceDeck || !targetDeck || sourceDeckId === targetDeckId) return state
       if (sourceDeck.kind === 'sequence' || targetDeck.kind === 'sequence') return state
-      
+
+      const nextSelectedItems = state.selectedItems
+        .filter((item) => item.id !== sourceDeckId)
+
+      if (
+        state.selectedItems.some((item) => item.id === sourceDeckId && item.kind === 'deck')
+        && !nextSelectedItems.some((item) => item.id === targetDeckId && item.kind === 'deck')
+      ) {
+        nextSelectedItems.push({ id: targetDeckId, kind: 'deck' as const })
+      }
+
       return {
         lanes: state.lanes.map(lane => {
           return {
@@ -1829,10 +1846,17 @@ export const useGameStore = create<GameState>((set, get) => ({
                 }
               : d
           ),
-        cards: normalizeCardsForDeck(sourceDeck.cardIds, state.cards).map((card) => (
+        cards: state.cards.map((card) => (
           sourceDeck.cardIds.includes(card.id)
             ? applyFaceStateFromContainer(
-                { ...card },
+                normalizeCardForDeck({
+                  ...card,
+                  location: 'deck',
+                  laneId: undefined,
+                  regionId: undefined,
+                  attachmentGroupId: undefined,
+                  attachmentIndex: undefined,
+                }),
                 state.lanes,
                 state.regions,
                 targetDeck.laneId,
@@ -1840,6 +1864,7 @@ export const useGameStore = create<GameState>((set, get) => ({
               )
             : card
         )),
+        selectedItems: nextSelectedItems,
       }
     }),
   removeTopCardFromDeck: (deckId: string) => {

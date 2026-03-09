@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { HERO_DECKS } from '../../config/gameSetup/heroes'
 import { VILLAIN_SETS } from '../../config/gameSetup/villains'
 import { MODULAR_SETS } from '../../config/gameSetup/modulars'
@@ -23,10 +23,6 @@ export function MarvelSetupForm({ disabled, onErrorMessageChange }: GameSetupRen
   const difficultyCode = typeof setupState.difficultyCode === 'string' ? setupState.difficultyCode : (DIFFICULTY_SETS[0]?.card_set_code ?? '')
   const villainInHardMode = Boolean(setupState.villainInHardMode)
 
-  const selectedHero = useMemo(
-    () => HERO_DECKS.find((hero) => hero.deckId === heroDeckId) ?? HERO_DECKS[0],
-    [heroDeckId],
-  )
   const trimmedCustomDeckId = customDeckIdInput.trim()
 
   async function lookupCustomDeck(deckIdInput: string) {
@@ -186,12 +182,6 @@ export function MarvelSetupForm({ disabled, onErrorMessageChange }: GameSetupRen
         />
         <span>Use hard mode for the villain setup</span>
       </label>
-
-      {selectedHero ? (
-        <p className="new-game-modal__hint">
-          Identity and permanent cards begin face-up in play. Encounter decks are shuffled after combining villain, modular, and standard sets.
-        </p>
-      ) : null}
     </>
   )
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getGameDefinition, getRegisteredGames } from '../games/registry'
+import { getGameDefinition } from '../games/registry'
 import { useGameStore } from '../store'
 import { clearStoredGameSession } from '../sessionPersistence'
 
@@ -10,7 +10,6 @@ interface NewGameModalProps {
 
 export function NewGameModal({ isOpen, onClose }: NewGameModalProps) {
   const activeGameId = useGameStore((state) => state.activeGameId)
-  const setActiveGame = useGameStore((state) => state.setActiveGame)
   const gameSetupState = useGameStore((state) => state.gameSetupState)
   const replaceBoardWithDecks = useGameStore((state) => state.replaceBoardWithDecks)
   const beginBoardLoad = useGameStore((state) => state.beginBoardLoad)
@@ -18,7 +17,6 @@ export function NewGameModal({ isOpen, onClose }: NewGameModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  const games = getRegisteredGames()
   const activeGame = getGameDefinition(activeGameId)
   const SetupRenderer = activeGame.setup.Renderer
 
@@ -93,22 +91,6 @@ export function NewGameModal({ isOpen, onClose }: NewGameModalProps) {
         </div>
 
         <div className="new-game-modal__body">
-          <label className="new-game-modal__field">
-            <span>Game</span>
-            <select
-              value={activeGameId}
-              onChange={(event) => {
-                setErrorMessage(null)
-                setActiveGame(event.target.value)
-              }}
-              disabled={isSubmitting}
-            >
-              {games.map((game) => (
-                <option key={game.id} value={game.id}>{game.name}</option>
-              ))}
-            </select>
-          </label>
-
           <SetupRenderer disabled={isSubmitting} onErrorMessageChange={setErrorMessage} />
 
           {errorMessage ? (

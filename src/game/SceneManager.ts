@@ -41,6 +41,7 @@ type DragOrigin = {
   laneId?: string;
   regionId?: string;
   laneIndex?: number;
+  deckCardIds?: string[];
 };
 
 type DragSelectionEntry = {
@@ -548,10 +549,17 @@ export class SceneManager {
     }
 
     if (this.pendingSelectionItem && dist > 5 && !this.activeDragCardId && !this.activeDragDeckId) {
-      if (this.pendingSelectionItems.length > 1 || this.isSelectionItemSelected(this.pendingSelectionItem)) {
+      const dragItems = this.resolveSelectionDragItems(this.pendingSelectionItem, this.pendingSelectionItems)
+      const shouldUseSingleCardDrag = this.shouldBeginSingleCardDrag(
+        this.pendingSelectionItem,
+        dragItems,
+        this.pendingCardId,
+      )
+
+      if (shouldUseSingleCardDrag) {
+        this.beginSingleDrag(this.pendingCardId!, true)
+      } else if (dragItems.length > 0) {
         this.beginSelectionDrag(this.pendingSelectionItem, this.pendingSelectionItems)
-      } else if (this.pendingCardId) {
-        this.beginSingleDrag(this.pendingCardId)
       }
     }
 
@@ -849,6 +857,9 @@ export class SceneManager {
     const store = useGameStore.getState();
     const dist = Math.hypot(e.clientX - this.dragStartClientPos.x, e.clientY - this.dragStartClientPos.y);
     const now = performance.now();
+    const draggedDeckCardIds = this.activeDragDeckId
+      ? [...(store.decks.find((deck) => deck.id === this.activeDragDeckId)?.cardIds ?? [])]
+      : []
 
     if (this.isMarqueeSelecting) {
       this.applyMarqueeSelection(e.clientX, e.clientY, store.marqueeSelection.additive)
@@ -991,10 +1002,14 @@ export class SceneManager {
           const targetCard = store.cards.find(c => c.id === dropTarget.id);
           if (targetCard?.regionId) {
             store.dropSelectionIntoRegion([{ id: this.activeDragDeckId, kind: 'deck' }], targetCard.regionId, false);
+          } else if (this.boardConfig.allowDirectTableCardDrop === false) {
+            // Leave the sequence at its existing origin when free table drops are disabled.
           } else {
             store.removeFromLane(this.activeDragDeckId);
             store.moveDeck(this.activeDragDeckId, [this.lastDragPos.x, 0, this.lastDragPos.z], undefined);
           }
+       } else if (this.boardConfig.allowDirectTableCardDrop === false) {
+          // Leave the deck at its existing origin when free table drops are disabled.
        } else {
           // Dropping on table outside lane
           store.removeFromLane(this.activeDragDeckId);
@@ -1022,7 +1037,7 @@ export class SceneManager {
           const hasConcreteTarget = Boolean(lane || dropTarget || region || this.boardConfig.allowDirectTableCardDrop !== false)
 
           if (draggingExaminedCard && hasConcreteTarget) {
-            store.removeCardFromExaminedStack(this.activeDragCardId)
+            this.detachExaminedCard(this.activeDragCardId)
           }
           
           if (lane) {
@@ -1065,7 +1080,7 @@ export class SceneManager {
           this.clearHandPreview();
        } else {
            if (draggingExaminedCard) {
-             store.removeCardFromExaminedStack(this.activeDragCardId);
+             this.detachExaminedCard(this.activeDragCardId);
            }
            const c = store.cards.find(c => c.id === this.activeDragCardId);
            if (c?.location === 'hand') {
@@ -1103,13 +1118,11 @@ export class SceneManager {
     }
     if (this.activeDragDeckId) {
       const store2 = useGameStore.getState();
-      const deck = store2.decks.find(d => d.id === this.activeDragDeckId);
-      if (deck) {
-        deck.cardIds.forEach(id => {
-          const c3D = this.cards.get(id);
-          if (c3D) c3D.setDragging(false);
-        });
-      }
+      const deckCardIds = store2.decks.find(d => d.id === this.activeDragDeckId)?.cardIds ?? draggedDeckCardIds;
+      deckCardIds.forEach(id => {
+        const c3D = this.cards.get(id);
+        if (c3D) c3D.setDragging(false);
+      });
     }
 
 	    this.activeDragCardId = null;
@@ -1121,26 +1134,25 @@ export class SceneManager {
 	    store.setDragging(false, null);
 
       // Some drop flows update card placement while the card is still marked as dragging,
-      // so run one final sync against the settled state to apply the new layout immediately.
-      this.sync(useGameStore.getState());
+      // so run one final sync against the settled state and snap the dragged deck cards
+      // to their resolved layout so merged stacks cannot remain visually stranded.
+      const settledState = useGameStore.getState();
+      this.sync(settledState);
+      draggedDeckCardIds.forEach((cardId) => {
+        this.cards.get(cardId)?.updateTransform();
+      });
 	  }
 
   private beginSelectionDrag(anchorItem: SelectionItem, forcedItems?: SelectionItem[]) {
     const store = useGameStore.getState()
-    const isAnchorSelected = this.isSelectionItemSelected(anchorItem)
-    const shouldUseForcedItems = Boolean(
-      !isAnchorSelected
-      && forcedItems
-      && forcedItems.length > 1
-      && forcedItems.some((item) => item.id !== anchorItem.id || item.kind !== anchorItem.kind),
-    )
-    const selectedItems = shouldUseForcedItems
-      ? forcedItems!.filter((item) => this.getRenderableSelectionItem(item))
-      : isAnchorSelected
-        ? store.selectedItems.filter((item) => this.getRenderableSelectionItem(item))
-        : [anchorItem]
+    const selectedItems = this.resolveSelectionDragItems(anchorItem, forcedItems)
 
-    if (!isAnchorSelected || shouldUseForcedItems) {
+    if (selectedItems.length === 1 && selectedItems[0]?.kind === 'card') {
+      this.beginSingleDrag(selectedItems[0].id, true)
+      return
+    }
+
+    if (!this.isSelectionItemSelected(anchorItem) || forcedItems?.some((item) => item.id !== anchorItem.id || item.kind !== anchorItem.kind)) {
       store.setSelectedItems(selectedItems)
     }
 
@@ -1175,12 +1187,12 @@ export class SceneManager {
     store.setDragging(true, anchorItem.kind, anchorItem.id)
   }
 
-  private beginSingleDrag(cardId: string) {
+  private beginSingleDrag(cardId: string, preserveSelection = false) {
     const store = useGameStore.getState()
     const cardModel = store.cards.find((entry) => entry.id === cardId)
     if (!cardModel) return
 
-    if (store.selectedItems.length > 0) {
+    if (!preserveSelection && store.selectedItems.length > 0) {
       store.clearSelection()
     }
 
@@ -1249,6 +1261,49 @@ export class SceneManager {
     store.setDragging(true, 'card', cardId)
   }
 
+  private resolveSelectionDragItems(anchorItem: SelectionItem, forcedItems?: SelectionItem[]) {
+    const store = useGameStore.getState()
+    const isAnchorSelected = this.isSelectionItemSelected(anchorItem)
+    const shouldUseForcedItems = Boolean(
+      !isAnchorSelected
+      && forcedItems
+      && forcedItems.length > 1
+      && forcedItems.some((item) => item.id !== anchorItem.id || item.kind !== anchorItem.kind),
+    )
+
+    return shouldUseForcedItems
+      ? forcedItems!.filter((item) => this.getRenderableSelectionItem(item))
+      : isAnchorSelected
+        ? store.selectedItems.filter((item) => this.getRenderableSelectionItem(item))
+        : [anchorItem]
+  }
+
+  private shouldBeginSingleCardDrag(
+    anchorItem: SelectionItem,
+    dragItems: SelectionItem[],
+    pendingCardId: string | null,
+  ) {
+    if (!pendingCardId || dragItems.length !== 1) return false
+
+    const [item] = dragItems
+    if (!item) return false
+    if (item.kind === 'card') return item.id === pendingCardId
+    if (item.kind !== 'deck') return false
+
+    const store = useGameStore.getState()
+    const clickedDeck = store.decks.find((deck) => deck.id === item.id && deck.cardIds.includes(pendingCardId))
+    if (!clickedDeck) return false
+    if (clickedDeck.kind === 'sequence') return false
+
+    const draggingExplicitlySelectedDeck = this.isSelectionItemSelected(item) || (
+      anchorItem.kind === 'deck'
+      && anchorItem.id === item.id
+      && this.isSelectionItemSelected(anchorItem)
+    )
+
+    return !draggingExplicitlySelectedDeck
+  }
+
   private getRenderableSelectionItem(item: SelectionItem) {
     const store = useGameStore.getState()
     if (item.kind === 'card') {
@@ -1288,6 +1343,7 @@ export class SceneManager {
       laneId: deck.laneId,
       regionId: deck.regionId,
       laneIndex: deck.laneId ? store.lanes.find((lane) => lane.id === deck.laneId)?.itemOrder.indexOf(deck.id) : undefined,
+      deckCardIds: [...deck.cardIds],
     }
   }
 
@@ -1309,6 +1365,24 @@ export class SceneManager {
     return deck ? [...deck.position] as [number, number, number] : null
   }
 
+  private detachExaminedSelectionItems(items: SelectionItem[]) {
+    const store = useGameStore.getState()
+    const detachedCardIds = new Set<string>()
+
+    items.forEach((item) => {
+      if (item.kind !== 'card') return
+      if (detachedCardIds.has(item.id)) return
+      if (!this.isCardInExaminedStack(item.id)) return
+
+      store.removeCardFromExaminedStack(item.id)
+      detachedCardIds.add(item.id)
+    })
+  }
+
+  private detachExaminedCard(cardId: string) {
+    this.detachExaminedSelectionItems([{ id: cardId, kind: 'card' }])
+  }
+
   private markSelectionDragging(items: SelectionItem[], dragging: boolean) {
     const store = useGameStore.getState()
     items.forEach((item) => {
@@ -1322,7 +1396,12 @@ export class SceneManager {
       }
 
       const deck = store.decks.find((entry) => entry.id === item.id)
-      deck?.cardIds.forEach((cardId) => {
+      const originDeckCardIds = this.dragOrigins.find((entry) => (
+        entry.item.kind === 'deck'
+        && entry.item.id === item.id
+      ))?.deckCardIds ?? []
+      const deckCardIds = deck?.cardIds ?? originDeckCardIds
+      deckCardIds.forEach((cardId) => {
         const card3D = this.cards.get(cardId)
         if (card3D) {
           card3D.setDragging(dragging)
@@ -1748,6 +1827,7 @@ export class SceneManager {
       const dropTarget = this.findDropTarget(this.lastDragPos.x, this.lastDragPos.z, [item.id])
 
       if (dropInHand) {
+        this.detachExaminedSelectionItems([item])
         store.removeFromLane(item.id)
         store.moveCard(item.id, 'hand')
         return
@@ -1760,15 +1840,18 @@ export class SceneManager {
         if (targetCard?.regionId) {
           this.dropSelectionIntoRegion([item], targetCard.regionId)
         } else {
+          this.detachExaminedSelectionItems([item])
           store.createDeck(item.id, dropTarget.id)
         }
       } else if (dropTarget?.type === 'deck') {
+        this.detachExaminedSelectionItems([item])
         store.addCardToDeck(item.id, dropTarget.id)
       } else if (region) {
         this.dropSelectionIntoRegion([item], region.id)
       } else if (this.boardConfig.allowDirectTableCardDrop === false) {
         this.restoreGroupDragOrigins()
       } else {
+        this.detachExaminedSelectionItems([item])
         store.removeFromLane(item.id)
         store.moveCard(item.id, 'table', [this.lastDragPos.x, 0, this.lastDragPos.z], [0, 0, 0])
       }
@@ -1792,6 +1875,8 @@ export class SceneManager {
       }
     } else if (region) {
       this.dropSelectionIntoRegion([item], region.id)
+    } else if (this.boardConfig.allowDirectTableCardDrop === false) {
+      this.restoreGroupDragOrigins()
     } else {
       store.removeFromLane(item.id)
       store.moveDeck(item.id, [this.lastDragPos.x, 0, this.lastDragPos.z], undefined)
@@ -1828,6 +1913,7 @@ export class SceneManager {
       return
     }
 
+    this.detachExaminedSelectionItems(items)
     const itemIds = items.map((item) => item.id)
     const existingOrderWithoutSelection = laneData.itemOrder.filter((id) => !itemIds.includes(id))
     const insertIdx = computeLaneInsertIndex(laneData, this.lastDragPos.x, existingOrderWithoutSelection.length, store.cards, store.decks, existingOrderWithoutSelection)
@@ -1864,11 +1950,13 @@ export class SceneManager {
 
   private dropSelectionIntoRegion(items: SelectionItem[], regionId: string) {
     const store = useGameStore.getState()
+    this.detachExaminedSelectionItems(items)
     store.dropSelectionIntoRegion(items, regionId, false)
   }
 
   private moveSelectionToTable(items: SelectionItem[]) {
     const store = useGameStore.getState()
+    this.detachExaminedSelectionItems(items)
     const units = this.getSelectionDropUnits(items)
 
     items.forEach((item) => {
@@ -1915,6 +2003,7 @@ export class SceneManager {
 
   private finishGroupDrag() {
     const store = useGameStore.getState()
+    const draggedDeckCardIds = this.dragOrigins.flatMap((origin) => origin.deckCardIds ?? [])
     this.markSelectionDragging(this.dragSelectionEntries.map((entry) => entry.item), false)
     this.dragSelectionEntries = []
     this.dragOrigins = []
@@ -1930,6 +2019,11 @@ export class SceneManager {
     store.setDraggedSelectionItems([])
     store.setDragTargetContext(null)
     store.setDragging(false, null)
+    const settledState = useGameStore.getState()
+    this.sync(settledState)
+    draggedDeckCardIds.forEach((cardId) => {
+      this.cards.get(cardId)?.updateTransform()
+    })
   }
 
   private syncActiveGroupDrag(state: GameState) {

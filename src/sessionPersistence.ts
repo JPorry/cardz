@@ -20,6 +20,9 @@ function readStoredSession(): SerializedGameSession | null {
     return null
   }
 
+  let latestSession: SerializedGameSession | null = null
+  let latestSavedAt = Number.NEGATIVE_INFINITY
+
   for (let index = 0; index < window.localStorage.length; index += 1) {
     const key = window.localStorage.key(index)
     if (!key || !key.includes('-session-v')) continue
@@ -27,12 +30,19 @@ function readStoredSession(): SerializedGameSession | null {
     if (!rawValue) continue
 
     try {
-      return parseSerializedGameSession(JSON.parse(rawValue))
+      const parsedSession = parseSerializedGameSession(JSON.parse(rawValue))
+      const savedAt = Date.parse(parsedSession.savedAt)
+      const sortValue = Number.isNaN(savedAt) ? 0 : savedAt
+      if (!latestSession || sortValue > latestSavedAt) {
+        latestSession = parsedSession
+        latestSavedAt = sortValue
+      }
     } catch {
       window.localStorage.removeItem(key)
     }
   }
-  return null
+
+  return latestSession
 }
 
 function writeStoredSession(session: SerializedGameSession) {

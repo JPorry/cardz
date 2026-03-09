@@ -41,6 +41,7 @@ type ResettableGameState = Pick<
   | 'handPreviewItemId'
   | 'hoveredCardId'
   | 'hoveredCardScreenX'
+  | 'touchQuickPreviewCardId'
   | 'previewCardId'
   | 'focusedCardId'
   | 'examinedStack'
@@ -355,6 +356,79 @@ function applyConfiguredRegionConfiguration(gameId: string, region: RegionState)
     : region
 }
 
+function shouldRestoreAsSequence(deck: DeckState, cards: CardState[]): boolean {
+  if (deck.kind === 'sequence') return true
+  if (deck.id === 'deck-villain' || deck.id === 'deck-main-scheme') return true
+  if (deck.cardIds.length < 2) return false
+
+  const deckCards = deck.cardIds
+    .map((cardId) => cards.find((card) => card.id === cardId))
+    .filter((card): card is CardState => Boolean(card))
+  if (deckCards.length !== deck.cardIds.length) return false
+
+  return deckCards.every((card) => card.typeCode === 'villain')
+    || deckCards.every((card) => card.typeCode === 'main_scheme')
+}
+
+function normalizeImportedDeckState(
+  cards: CardState[],
+  decks: DeckState[],
+  lanes: LaneState[],
+): { cards: CardState[]; decks: DeckState[]; lanes: LaneState[] } {
+  const normalizedDecks = decks.map((deck) => (
+    shouldRestoreAsSequence(deck, cards)
+      ? { ...deck, kind: 'sequence' as const }
+      : deck
+  ))
+
+  const deckByCardId = new Map<string, DeckState>()
+  normalizedDecks.forEach((deck) => {
+    deck.cardIds.forEach((cardId) => {
+      deckByCardId.set(cardId, deck)
+    })
+  })
+
+  const normalizedCards = cards.map((card) => {
+    const deck = deckByCardId.get(card.id)
+    if (!deck) return card
+
+    return {
+      ...card,
+      location: 'deck' as const,
+      position: [...deck.position] as [number, number, number],
+      rotation: [...deck.rotation] as [number, number, number],
+      laneId: undefined,
+      regionId: undefined,
+      attachmentGroupId: undefined,
+      attachmentIndex: undefined,
+    }
+  })
+
+  const normalizedLanes = lanes.map((lane) => {
+    const deckIdsForLane = normalizedDecks
+      .filter((deck) => deck.laneId === lane.id)
+      .map((deck) => deck.id)
+    const memberCardIds = new Set(
+      normalizedDecks
+        .filter((deck) => deck.laneId === lane.id)
+        .flatMap((deck) => deck.cardIds),
+    )
+    const filteredOrder = lane.itemOrder.filter((id) => !memberCardIds.has(id))
+    const deckIdsMissingFromLane = deckIdsForLane.filter((deckId) => !filteredOrder.includes(deckId))
+
+    return {
+      ...lane,
+      itemOrder: [...filteredOrder, ...deckIdsMissingFromLane],
+    }
+  })
+
+  return {
+    cards: normalizedCards,
+    decks: normalizedDecks,
+    lanes: normalizedLanes,
+  }
+}
+
 function createDefaultResetState(gameId: string): ResettableGameState {
   const game = getGameDefinition(gameId)
   const initialLanes = createInitialLanes(game.board.layout)
@@ -376,6 +450,7 @@ function createDefaultResetState(gameId: string): ResettableGameState {
     handPreviewItemId: null,
     hoveredCardId: null,
     hoveredCardScreenX: null,
+    touchQuickPreviewCardId: null,
     previewCardId: null,
     focusedCardId: null,
     examinedStack: null,
@@ -467,14 +542,22 @@ export function parseSerializedGameSession(value: unknown): SerializedGameSessio
 
 export function createImportedGameState(session: SerializedGameSession): ResettableGameState {
   const resetState = createDefaultResetState(session.state.gameId)
+  const decks = session.state.decks.map(cloneDeck)
+  const lanes = session.state.lanes.map(cloneLane).map((lane) => applyConfiguredLaneConfiguration(session.state.gameId, lane))
+  const normalizedImportedState = normalizeImportedDeckState(
+    session.state.cards.map(cloneCard),
+    decks,
+    lanes,
+  )
+
   return {
     ...resetState,
     activeGameId: session.state.gameId,
     activeGameVersion: session.state.gameVersion,
     gameSetupState: getGameDefinition(session.state.gameId).setup.createInitialState(),
-    cards: session.state.cards.map(cloneCard),
-    decks: session.state.decks.map(cloneDeck),
-    lanes: session.state.lanes.map(cloneLane).map((lane) => applyConfiguredLaneConfiguration(session.state.gameId, lane)),
+    cards: normalizedImportedState.cards,
+    decks: normalizedImportedState.decks,
+    lanes: normalizedImportedState.lanes,
     regions: session.state.regions.map(cloneRegion).map((region) => applyConfiguredRegionConfiguration(session.state.gameId, region)),
     examinedStack: cloneExaminedStack(session.state.examinedStack),
   }

@@ -1,7 +1,8 @@
+import { getGameDefinition } from '../games/registry'
 import { getDeckTopCardId, type GameState, type SelectionItem } from '../store'
 
 export function getSelectionPreviewCardId(
-  state: Pick<GameState, 'cards' | 'decks'>,
+  state: Pick<GameState, 'activeGameId' | 'cards' | 'decks'>,
   item: SelectionItem,
   fallbackCardId: string | null = null,
 ) {
@@ -15,5 +16,8 @@ export function getSelectionPreviewCardId(
   const topCardId = getDeckTopCardId(deck)
   if (!topCardId) return null
   const topCard = state.cards.find((entry) => entry.id === topCardId)
-  return topCard?.faceUp ? topCardId : null
+  if (!topCard) return null
+
+  const game = getGameDefinition(state.activeGameId)
+  return game.cardPresentation.hasVisibleGameplayFace(topCard) ? topCardId : null
 }
