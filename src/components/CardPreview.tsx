@@ -222,9 +222,10 @@ export const CardPreview: React.FC = () => {
   const touchPreviewTitle = getTouchPreviewTitle(selectedItems, quickPreviewCard, selectedDeck)
   const canEditPreviewCard = !!(
     quickPreviewCard
-    && touchPreviewSelection
-    && touchPreviewSelection.kind === 'card'
-    && selectedItems.some((item) => item.kind === 'card' && item.id === quickPreviewCard.id)
+    && (
+      selectedItems.some((item) => item.kind === 'card' && item.id === quickPreviewCard.id)
+      || (selectedItems.length === 1 && selectedItems[0]?.kind === 'deck')
+    )
   )
   const closePreview = () => {
     if (previewOpenedAtRef.current !== null && performance.now() - previewOpenedAtRef.current < 250) return
