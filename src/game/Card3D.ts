@@ -12,7 +12,7 @@ const OVERLAY_TEXTURE_WIDTH = 512;
 const OVERLAY_TEXTURE_HEIGHT = 768;
 const OVERLAY_PLANE_WIDTH = CARD_WIDTH * 0.94;
 const OVERLAY_PLANE_HEIGHT = CARD_HEIGHT * 0.94;
-const OVERLAY_OFFSET = CARD_THICKNESS / 2 + 0.008;
+const OVERLAY_OFFSET = CARD_THICKNESS / 2 + 0.02;
 
 export class Card3D {
   id: string;
@@ -361,22 +361,24 @@ export class Card3D {
     const frontMaterial = new THREE.MeshBasicMaterial({
       map: frontTexture,
       transparent: true,
+      alphaTest: 0.05,
       depthTest: true,
       depthWrite: false,
       polygonOffset: true,
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -1,
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide,
     });
     const backMaterial = new THREE.MeshBasicMaterial({
       map: backTexture,
       transparent: true,
+      alphaTest: 0.05,
       depthTest: true,
       depthWrite: false,
       polygonOffset: true,
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -1,
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide,
     });
 
     this.metadataOverlayFrontTexture = frontTexture;

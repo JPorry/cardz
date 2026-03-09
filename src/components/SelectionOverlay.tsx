@@ -101,24 +101,23 @@ export function SelectionOverlay() {
         const maxTop = Math.max(MENU_VIEWPORT_MARGIN, window.innerHeight - menuHeight - MENU_VIEWPORT_MARGIN)
         const preferredRight = selectionBounds.x + selectionBounds.width + MENU_OFFSET
         const preferredLeft = selectionBounds.x - menuWidth - MENU_OFFSET
-
-        let left = clamp(
-          selectionBounds.x + selectionBounds.width / 2 - menuWidth / 2,
-          MENU_VIEWPORT_MARGIN,
-          maxLeft,
-        )
-
-        if (preferredRight + menuWidth <= window.innerWidth - MENU_VIEWPORT_MARGIN) {
-          left = preferredRight
-        } else if (preferredLeft >= MENU_VIEWPORT_MARGIN) {
-          left = preferredLeft
-        }
-
+        const selectionCenterX = selectionBounds.x + selectionBounds.width / 2
         const top = clamp(
           selectionBounds.y + selectionBounds.height / 2 - menuHeight / 2,
           MENU_VIEWPORT_MARGIN,
           maxTop,
         )
+
+        const cardOnRightHalf = selectionCenterX >= window.innerWidth / 2
+        const sameSideLeft = cardOnRightHalf ? preferredRight : preferredLeft
+        const oppositeSideLeft = cardOnRightHalf ? preferredLeft : preferredRight
+        const sameSideFits = sameSideLeft >= MENU_VIEWPORT_MARGIN && sameSideLeft <= maxLeft
+        const oppositeSideFits = oppositeSideLeft >= MENU_VIEWPORT_MARGIN && oppositeSideLeft <= maxLeft
+
+        let left = clamp(sameSideLeft, MENU_VIEWPORT_MARGIN, maxLeft)
+        if (!sameSideFits && oppositeSideFits) {
+          left = oppositeSideLeft
+        }
 
         return {
           left,
