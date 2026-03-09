@@ -1,12 +1,15 @@
-import { INITIAL_LANES, INITIAL_REGIONS } from './utils/boardUtils'
 import type { CardLocation, CardState, DeckKind, DeckState, ExaminedStackState, GameState, LaneState, RegionState } from './store'
 import type { TitlePosition } from './utils/areaLayout'
+import { createInitialLanes, createInitialRegions } from './games/boardLayout'
+import { getDefaultGame, getGameDefinition } from './games/registry'
+import type { GameCardSemantics } from './games/types'
 import { normalizeCardCounters, normalizeCardStatuses } from './utils/cardMetadata'
 
-export const GAME_SESSION_VERSION = 4
-export const GAME_SESSION_STORAGE_KEY = `marvel-champions-session-v${GAME_SESSION_VERSION}`
+export const GAME_SESSION_VERSION = 5
 
 export interface SerializedGameSessionState {
+  gameId: string
+  gameVersion: number
   cards: CardState[]
   decks: DeckState[]
   lanes: LaneState[]
@@ -22,6 +25,9 @@ export interface SerializedGameSession {
 
 type ResettableGameState = Pick<
   GameState,
+  | 'activeGameId'
+  | 'activeGameVersion'
+  | 'gameSetupState'
   | 'cards'
   | 'decks'
   | 'lanes'
@@ -35,6 +41,7 @@ type ResettableGameState = Pick<
   | 'handPreviewItemId'
   | 'hoveredCardId'
   | 'hoveredCardScreenX'
+  | 'touchQuickPreviewCardId'
   | 'previewCardId'
   | 'focusedCardId'
   | 'examinedStack'
@@ -143,7 +150,7 @@ function parseOptionalTitlePosition(value: unknown): TitlePosition {
   return parseTitlePosition(value)
 }
 
-function parseCardState(value: unknown): CardState {
+function parseCardState(value: unknown, semantics: GameCardSemantics): CardState {
   if (!isObject(value)) {
     throw new Error('Invalid card entry.')
   }
@@ -177,8 +184,8 @@ function parseCardState(value: unknown): CardState {
     tapped: parseOptionalBoolean(value.tapped),
     attachmentGroupId: parseOptionalString(value.attachmentGroupId),
     attachmentIndex: parseOptionalNumber(value.attachmentIndex),
-    counters: normalizeCardCounters(isObject(value.counters) ? value.counters : undefined),
-    statuses: normalizeCardStatuses(isObject(value.statuses) ? value.statuses : undefined),
+    counters: normalizeCardCounters(semantics, isObject(value.counters) ? value.counters : undefined),
+    statuses: normalizeCardStatuses(semantics, isObject(value.statuses) ? value.statuses : undefined),
   }
 }
 
@@ -318,8 +325,8 @@ function cloneExaminedStack(examinedStack: ExaminedStackState | null): ExaminedS
   }
 }
 
-function applyConfiguredLaneConfiguration(lane: LaneState): LaneState {
-  const configuredLane = INITIAL_LANES.find((entry) => entry.id === lane.id)
+function applyConfiguredLaneConfiguration(gameId: string, lane: LaneState): LaneState {
+  const configuredLane = createInitialLanes(getGameDefinition(gameId).board.layout).find((entry) => entry.id === lane.id)
   return configuredLane
     ? {
       ...lane,
@@ -334,8 +341,8 @@ function applyConfiguredLaneConfiguration(lane: LaneState): LaneState {
     : lane
 }
 
-function applyConfiguredRegionConfiguration(region: RegionState): RegionState {
-  const configuredRegion = INITIAL_REGIONS.find((entry) => entry.id === region.id)
+function applyConfiguredRegionConfiguration(gameId: string, region: RegionState): RegionState {
+  const configuredRegion = createInitialRegions(getGameDefinition(gameId).board.layout).find((entry) => entry.id === region.id)
   return configuredRegion
     ? {
       ...region,
@@ -349,12 +356,91 @@ function applyConfiguredRegionConfiguration(region: RegionState): RegionState {
     : region
 }
 
-function createDefaultResetState(): ResettableGameState {
+function shouldRestoreAsSequence(deck: DeckState, cards: CardState[]): boolean {
+  if (deck.kind === 'sequence') return true
+  if (deck.id === 'deck-villain' || deck.id === 'deck-main-scheme') return true
+  if (deck.cardIds.length < 2) return false
+
+  const deckCards = deck.cardIds
+    .map((cardId) => cards.find((card) => card.id === cardId))
+    .filter((card): card is CardState => Boolean(card))
+  if (deckCards.length !== deck.cardIds.length) return false
+
+  return deckCards.every((card) => card.typeCode === 'villain')
+    || deckCards.every((card) => card.typeCode === 'main_scheme')
+}
+
+function normalizeImportedDeckState(
+  cards: CardState[],
+  decks: DeckState[],
+  lanes: LaneState[],
+): { cards: CardState[]; decks: DeckState[]; lanes: LaneState[] } {
+  const normalizedDecks = decks.map((deck) => (
+    shouldRestoreAsSequence(deck, cards)
+      ? { ...deck, kind: 'sequence' as const }
+      : deck
+  ))
+
+  const deckByCardId = new Map<string, DeckState>()
+  normalizedDecks.forEach((deck) => {
+    deck.cardIds.forEach((cardId) => {
+      deckByCardId.set(cardId, deck)
+    })
+  })
+
+  const normalizedCards = cards.map((card) => {
+    const deck = deckByCardId.get(card.id)
+    if (!deck) return card
+
+    return {
+      ...card,
+      location: 'deck' as const,
+      position: [...deck.position] as [number, number, number],
+      rotation: [...deck.rotation] as [number, number, number],
+      laneId: undefined,
+      regionId: undefined,
+      attachmentGroupId: undefined,
+      attachmentIndex: undefined,
+    }
+  })
+
+  const normalizedLanes = lanes.map((lane) => {
+    const deckIdsForLane = normalizedDecks
+      .filter((deck) => deck.laneId === lane.id)
+      .map((deck) => deck.id)
+    const memberCardIds = new Set(
+      normalizedDecks
+        .filter((deck) => deck.laneId === lane.id)
+        .flatMap((deck) => deck.cardIds),
+    )
+    const filteredOrder = lane.itemOrder.filter((id) => !memberCardIds.has(id))
+    const deckIdsMissingFromLane = deckIdsForLane.filter((deckId) => !filteredOrder.includes(deckId))
+
+    return {
+      ...lane,
+      itemOrder: [...filteredOrder, ...deckIdsMissingFromLane],
+    }
+  })
+
   return {
+    cards: normalizedCards,
+    decks: normalizedDecks,
+    lanes: normalizedLanes,
+  }
+}
+
+function createDefaultResetState(gameId: string): ResettableGameState {
+  const game = getGameDefinition(gameId)
+  const initialLanes = createInitialLanes(game.board.layout)
+  const initialRegions = createInitialRegions(game.board.layout)
+  return {
+    activeGameId: game.id,
+    activeGameVersion: game.version,
+    gameSetupState: game.setup.createInitialState(),
     cards: [],
     decks: [],
-    lanes: INITIAL_LANES.map((lane) => ({ ...lane, itemOrder: [] })),
-    regions: INITIAL_REGIONS.map(cloneRegion),
+    lanes: initialLanes.map((lane) => ({ ...lane, itemOrder: [] })),
+    regions: initialRegions.map(cloneRegion),
     activeLaneId: null,
     activeRegionId: null,
     lanePreviewLaneId: null,
@@ -364,6 +450,7 @@ function createDefaultResetState(): ResettableGameState {
     handPreviewItemId: null,
     hoveredCardId: null,
     hoveredCardScreenX: null,
+    touchQuickPreviewCardId: null,
     previewCardId: null,
     focusedCardId: null,
     examinedStack: null,
@@ -385,9 +472,11 @@ function createDefaultResetState(): ResettableGameState {
 }
 
 export function createSessionStateSnapshot(
-  state: Pick<GameState, 'cards' | 'decks' | 'lanes' | 'regions' | 'examinedStack'>,
+  state: Pick<GameState, 'activeGameId' | 'activeGameVersion' | 'cards' | 'decks' | 'lanes' | 'regions' | 'examinedStack'>,
 ): SerializedGameSessionState {
   return {
+    gameId: state.activeGameId,
+    gameVersion: state.activeGameVersion,
     cards: state.cards.map(cloneCard),
     decks: state.decks.map(cloneDeck),
     lanes: state.lanes.map(cloneLane),
@@ -397,7 +486,7 @@ export function createSessionStateSnapshot(
 }
 
 export function exportSerializedGameSession(
-  state: Pick<GameState, 'cards' | 'decks' | 'lanes' | 'regions' | 'examinedStack'>,
+  state: Pick<GameState, 'activeGameId' | 'activeGameVersion' | 'cards' | 'decks' | 'lanes' | 'regions' | 'examinedStack'>,
 ): SerializedGameSession {
   return {
     version: GAME_SESSION_VERSION,
@@ -423,11 +512,14 @@ export function parseSerializedGameSession(value: unknown): SerializedGameSessio
     throw new Error('Session payload is missing state.')
   }
 
+  const gameId = isString(value.state.gameId) ? value.state.gameId : getDefaultGame().id
+  const game = getGameDefinition(gameId)
   const cards = value.state.cards
   const decks = value.state.decks
   const lanes = value.state.lanes
   const regions = value.state.regions
   const examinedStack = 'examinedStack' in value.state ? value.state.examinedStack : null
+  const gameVersion = typeof value.state.gameVersion === 'number' ? value.state.gameVersion : game.version
 
   if (!Array.isArray(cards) || !Array.isArray(decks) || !Array.isArray(lanes) || !Array.isArray(regions)) {
     throw new Error('Session payload must include cards, decks, lanes, and regions arrays.')
@@ -437,7 +529,9 @@ export function parseSerializedGameSession(value: unknown): SerializedGameSessio
     version: GAME_SESSION_VERSION,
     savedAt: value.savedAt,
     state: {
-      cards: cards.map(parseCardState),
+      gameId: game.id,
+      gameVersion,
+      cards: cards.map((card) => parseCardState(card, game.cardSemantics)),
       decks: decks.map(parseDeckState),
       lanes: lanes.map(parseLaneState),
       regions: regions.map(parseRegionState),
@@ -447,13 +541,24 @@ export function parseSerializedGameSession(value: unknown): SerializedGameSessio
 }
 
 export function createImportedGameState(session: SerializedGameSession): ResettableGameState {
-  const resetState = createDefaultResetState()
+  const resetState = createDefaultResetState(session.state.gameId)
+  const decks = session.state.decks.map(cloneDeck)
+  const lanes = session.state.lanes.map(cloneLane).map((lane) => applyConfiguredLaneConfiguration(session.state.gameId, lane))
+  const normalizedImportedState = normalizeImportedDeckState(
+    session.state.cards.map(cloneCard),
+    decks,
+    lanes,
+  )
+
   return {
     ...resetState,
-    cards: session.state.cards.map(cloneCard),
-    decks: session.state.decks.map(cloneDeck),
-    lanes: session.state.lanes.map(cloneLane).map(applyConfiguredLaneConfiguration),
-    regions: session.state.regions.map(cloneRegion).map(applyConfiguredRegionConfiguration),
+    activeGameId: session.state.gameId,
+    activeGameVersion: session.state.gameVersion,
+    gameSetupState: getGameDefinition(session.state.gameId).setup.createInitialState(),
+    cards: normalizedImportedState.cards,
+    decks: normalizedImportedState.decks,
+    lanes: normalizedImportedState.lanes,
+    regions: session.state.regions.map(cloneRegion).map((region) => applyConfiguredRegionConfiguration(session.state.gameId, region)),
     examinedStack: cloneExaminedStack(session.state.examinedStack),
   }
 }

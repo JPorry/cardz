@@ -1,6 +1,5 @@
 import {
   type CardMatchConfig,
-  getRegionConfig,
   type BoardActionTargetRef,
   type DeckSourcePosition,
   type MergeRegionAction,
@@ -14,6 +13,7 @@ import {
   type GameState,
   type SelectionItem,
 } from '../store'
+import { getGameDefinition } from '../games/registry'
 
 export interface ContextualMenuAction {
   id: string
@@ -93,7 +93,7 @@ function getSingleSelectedRegionContext(
 
   if (!regionId) return null
 
-  const region = getRegionConfig(regionId)
+  const region = getGameDefinition(useGameStore.getState().activeGameId).actions.getRegionConfig(regionId)
   if (!region?.actions?.length) return null
 
   return {

@@ -513,7 +513,7 @@ function parseRegionConfig(
   }
 }
 
-function parseBoardLayout(value: unknown): BoardLayoutConfig {
+export function parseBoardLayout(value: unknown): BoardLayoutConfig {
   if (!isObject(value)) {
     throw new Error('Invalid board layout config.')
   }

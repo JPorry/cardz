@@ -8,10 +8,12 @@ import { BoardShortcuts } from './components/BoardShortcuts'
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal'
 import { useGameStore } from './store'
 import { parseGameSessionFileContent, persistImportedGameSession, startGameSessionAutosave, bootstrapStoredGameSession } from './sessionPersistence'
+import { getGameDefinition } from './games/registry'
 import './index.css'
 
-function createSessionFileName() {
-  return `marvel-session-${new Date().toISOString().replace(/[:.]/g, '-').replace('Z', '')}.json`
+function createSessionFileName(gameId: string) {
+  const game = getGameDefinition(gameId)
+  return `${game.session.exportFilePrefix}-${new Date().toISOString().replace(/[:.]/g, '-').replace('Z', '')}.json`
 }
 
 function App() {
@@ -21,6 +23,8 @@ function App() {
   const isExaminingStack = useGameStore((state) => state.examinedStack !== null)
   const boardLoadPhase = useGameStore((state) => state.boardLoadPhase)
   const boardLoadingLabel = useGameStore((state) => state.boardLoadingLabel)
+  const activeGameId = useGameStore((state) => state.activeGameId)
+  const activeGame = getGameDefinition(activeGameId)
 
   useEffect(() => {
     bootstrapStoredGameSession()
@@ -43,7 +47,7 @@ function App() {
     const downloadUrl = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = downloadUrl
-    link.download = createSessionFileName()
+    link.download = createSessionFileName(activeGameId)
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -75,7 +79,7 @@ function App() {
       {boardLoadPhase !== 'idle' ? (
         <div className="board-loading-indicator" role="status" aria-live="polite">
           <span className="board-loading-indicator__dot" aria-hidden="true" />
-          <span>{boardLoadingLabel ?? (boardLoadPhase === 'preparing' ? 'Preparing board...' : 'Finishing setup...')}</span>
+          <span>{boardLoadingLabel ?? (boardLoadPhase === 'preparing' ? activeGame.ui.preparingNewGameLabel : activeGame.ui.settlingNewGameLabel)}</span>
         </div>
       ) : null}
       <SelectionOverlay />

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSupportsHoverPreview } from '../hooks/useSupportsHoverPreview'
 import { useGameStore } from '../store'
+import { getSelectionPreviewCardId } from '../utils/previewCards'
 import { getSelectionActionSet } from '../utils/selectionActions'
 
 const TOUCH_MENU_DELAY_MS = 350
@@ -19,6 +20,7 @@ export function SelectionOverlay() {
   const selectedItems = useGameStore((state) => state.selectedItems)
   const selectionBounds = useGameStore((state) => state.selectionBounds)
   const marqueeSelection = useGameStore((state) => state.marqueeSelection)
+  const touchQuickPreviewCardId = useGameStore((state) => state.touchQuickPreviewCardId)
   const previewCardId = useGameStore((state) => state.previewCardId)
   const isExaminingStack = useGameStore((state) => state.examinedStack !== null)
   const isDragging = useGameStore((state) => state.isDragging)
@@ -30,10 +32,10 @@ export function SelectionOverlay() {
   const selectionKey = selectedItems.map((item) => `${item.kind}:${item.id}`).join('|')
 
   useEffect(() => {
-    if (!previewCardId || selectionKey.length === 0) return
+    if ((!previewCardId && !touchQuickPreviewCardId) || selectionKey.length === 0) return
     setSuppressedSelectionKey(selectionKey)
     setShowMenu(false)
-  }, [previewCardId, selectionKey])
+  }, [previewCardId, touchQuickPreviewCardId, selectionKey])
 
   useEffect(() => {
     if (isDragging && selectionKey.length > 0) {
@@ -131,6 +133,30 @@ export function SelectionOverlay() {
   const marqueeTop = Math.min(marqueeSelection.startY, marqueeSelection.currentY)
   const marqueeWidth = Math.abs(marqueeSelection.currentX - marqueeSelection.startX)
   const marqueeHeight = Math.abs(marqueeSelection.currentY - marqueeSelection.startY)
+  const handleActionClick = (action: typeof menuActions[number]) => {
+    const isTouchFlipAction = !supportsImmediateMenu && (action.id === 'flip-stack' || action.id === 'flip-cards')
+    if (!isTouchFlipAction) {
+      action.execute()
+      return
+    }
+
+    action.execute()
+
+    const state = useGameStore.getState()
+    const [selectedItem] = state.selectedItems
+    const previewCardId = state.selectedItems.length === 1 && selectedItem
+      ? getSelectionPreviewCardId(state, selectedItem, state.focusedCardId)
+      : null
+
+    if (!previewCardId) {
+      state.clearTouchQuickPreview()
+      return
+    }
+
+    state.setTouchQuickPreviewCard(previewCardId)
+    setSuppressedSelectionKey(state.selectedItems.map((item) => `${item.kind}:${item.id}`).join('|'))
+    setShowMenu(false)
+  }
 
   return (
     <>
@@ -155,7 +181,7 @@ export function SelectionOverlay() {
           }}
         >
           {menuActions.map((action) => (
-            <button key={action.id} className="selection-menu__button" onClick={action.execute}>
+            <button key={action.id} className="selection-menu__button" onClick={() => handleActionClick(action)}>
               {action.label}
             </button>
           ))}

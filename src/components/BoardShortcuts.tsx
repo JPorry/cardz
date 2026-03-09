@@ -1,8 +1,7 @@
 import { useEffect, useEffectEvent } from 'react'
 import { executeFlipShortcut, executeStackShortcut, executeTapShortcut } from '../utils/selectionActions'
 import { getDeckTopCardId, useGameStore } from '../store'
-import { getCardBackUrl } from '../services/marvelCdb'
-import { BOARD_SHORTCUTS, COUNTER_SHORTCUT_KEYS, STATUS_SHORTCUT_KEYS } from '../config/shortcuts'
+import { getGameDefinition } from '../games/registry'
 
 type BoardShortcutsProps = {
   disabled?: boolean
@@ -11,19 +10,6 @@ type BoardShortcutsProps = {
 type ShortcutDefinition = {
   key: string
   execute: () => void
-}
-
-const SHORTCUTS: ShortcutDefinition[] = [
-  { key: BOARD_SHORTCUTS[0].key.toLowerCase(), execute: executeFlipShortcut },
-  { key: BOARD_SHORTCUTS[1].key.toLowerCase(), execute: executeTapShortcut },
-  { key: BOARD_SHORTCUTS[2].key.toLowerCase(), execute: executeStackShortcut },
-]
-
-function hasVisibleGameplayFace(card: NonNullable<ReturnType<typeof useGameStore.getState>['cards'][number]>) {
-  return card.faceUp || (
-    Boolean(card.backArtworkUrl)
-    && card.backArtworkUrl !== getCardBackUrl(card.typeCode)
-  )
 }
 
 function isInteractiveElement(target: EventTarget | null): boolean {
@@ -35,6 +21,7 @@ function isInteractiveElement(target: EventTarget | null): boolean {
 export function BoardShortcuts({ disabled = false }: BoardShortcutsProps) {
   const executeHoveredCardShortcut = useEffectEvent((key: string) => {
     const store = useGameStore.getState()
+    const game = getGameDefinition(store.activeGameId)
     const hoveredCardId = store.hoveredCardId
     const hoveredCardZone = store.hoveredCardZone
     if (!hoveredCardId || !hoveredCardZone) {
@@ -42,7 +29,7 @@ export function BoardShortcuts({ disabled = false }: BoardShortcutsProps) {
     }
 
     const card = store.cards.find((entry) => entry.id === hoveredCardId)
-    if (!card || !hasVisibleGameplayFace(card)) {
+    if (!card || !game.cardPresentation.hasVisibleGameplayFace(card)) {
       return false
     }
 
@@ -54,14 +41,14 @@ export function BoardShortcuts({ disabled = false }: BoardShortcutsProps) {
       return false
     }
 
-    const counterKey = COUNTER_SHORTCUT_KEYS[key]
+    const counterKey = game.shortcuts.counterShortcutKeys[key]
     if (counterKey) {
       const delta = hoveredCardZone === 'top' ? 1 : -1
       store.adjustCardCounter(hoveredCardId, counterKey, delta)
       return true
     }
 
-    const statusKey = STATUS_SHORTCUT_KEYS[key]
+    const statusKey = game.shortcuts.statusShortcutKeys[key]
     if (statusKey) {
       store.toggleCardStatus(hoveredCardId, statusKey)
       return true
@@ -71,6 +58,12 @@ export function BoardShortcuts({ disabled = false }: BoardShortcutsProps) {
   })
 
   const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    const game = getGameDefinition(useGameStore.getState().activeGameId)
+    const shortcuts: ShortcutDefinition[] = [
+      { key: game.shortcuts.board[0]?.key.toLowerCase() ?? 'f', execute: executeFlipShortcut },
+      { key: game.shortcuts.board[1]?.key.toLowerCase() ?? 't', execute: executeTapShortcut },
+      { key: game.shortcuts.board[2]?.key.toLowerCase() ?? 's', execute: executeStackShortcut },
+    ]
     if (disabled || event.repeat || event.metaKey || event.ctrlKey || event.altKey) {
       return
     }
@@ -86,7 +79,7 @@ export function BoardShortcuts({ disabled = false }: BoardShortcutsProps) {
       return
     }
 
-    const shortcut = SHORTCUTS.find((entry) => entry.key === key)
+    const shortcut = shortcuts.find((entry) => entry.key === key)
     if (!shortcut) return
 
     event.preventDefault()
