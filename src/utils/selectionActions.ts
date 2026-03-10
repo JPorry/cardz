@@ -57,7 +57,6 @@ function canAttachCards(cards: GameState['cards']) {
 
   return cards.every((card) => (
     card.location === 'table'
-    && !card.regionId
   ))
 }
 
@@ -144,6 +143,18 @@ export function getSelectionActionSet(
   const selectedCards = getSelectedCards(state, selectedCardIds)
   const selectedAttachmentGroupId = getSingleAttachmentGroupId(selectedCards)
   const canAttachSelection = selectedDeckIds.length === 0 && canAttachCards(selectedCards)
+  const selectedSequenceDeck = selectedDeckIds.length === 1
+    ? state.decks.find((deck) => deck.id === selectedDeckIds[0] && deck.kind === 'sequence') ?? null
+    : null
+  const selectedSequenceTopCardId = selectedSequenceDeck?.cardIds[0] ?? null
+  const selectedSequenceTopCard = selectedSequenceTopCardId
+    ? state.cards.find((card) => card.id === selectedSequenceTopCardId) ?? null
+    : null
+  const canAttachToSequence = Boolean(
+    selectedSequenceDeck
+    && selectedSequenceTopCard
+    && selectedCards.every((card) => card.location === 'table')
+  )
   const { flipCards, tapCards, flipStack, tapDeck, shuffleDeck, nextSequence, previousSequence, attachCards, detachAttachmentGroup, createStackFromCards, combineSelectionIntoStack, setPreviewCard, openDeckExamine } = state
 
   const actions: SelectionAction[] = []
@@ -163,6 +174,11 @@ export function getSelectionActionSet(
       { id: 'tap-stack', label: 'Tap', execute: () => tapDeck(selectedDeck.id) },
       { id: 'examine-stack', label: 'Examine', execute: () => openDeckExamine(selectedDeck.id) },
     )
+    if (selectedDeck.kind === 'sequence' && selectedSequenceTopCard?.attachmentGroupId) {
+      actions.push(
+        { id: 'detach-attachment', label: 'Detach', execute: () => detachAttachmentGroup(selectedSequenceTopCard.attachmentGroupId!) },
+      )
+    }
     if (selectedDeck.kind === 'sequence') {
       actions.push(
         { id: 'previous-sequence', label: 'Previous', execute: () => previousSequence(selectedDeck.id) },
@@ -223,6 +239,13 @@ export function getSelectionActionSet(
           selectedDeckIds.forEach((deckId) => tapDeck(deckId))
         },
       },
+      ...(canAttachToSequence && selectedSequenceTopCardId
+        ? [{
+            id: 'attach-cards',
+            label: 'Attach',
+            execute: () => attachCards([selectedSequenceTopCardId, ...selectedCardIds]),
+          } satisfies SelectionAction]
+        : []),
       ...(!includesSequence
         ? [{
             id: 'combine',

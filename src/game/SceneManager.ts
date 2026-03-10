@@ -22,11 +22,13 @@ const DRAG_RENDER_ORDER = 20000;
 const BOARD_SIDE_MARGIN_PX = 20;
 const TABLE_CENTER_Z = -3;
 const TABLE_CORNER_RADIUS = 1.7;
+const POINTER_DRAG_THRESHOLD_PX = 5;
+const TOUCH_DRAG_THRESHOLD_PX = 14;
 
 type DraggedCardOrigin = {
   cardId: string;
   card: Pick<CardState, 'location' | 'position' | 'rotation' | 'faceUp' | 'laneId' | 'regionId'>;
-  sourceDeck?: Pick<DeckState, 'id' | 'kind' | 'position' | 'rotation' | 'cardIds' | 'laneId' | 'regionId'> & {
+  sourceDeck?: Pick<DeckState, 'id' | 'kind' | 'position' | 'rotation' | 'tapped' | 'cardIds' | 'laneId' | 'regionId'> & {
     laneIndex?: number;
   };
   examinedStack?: {
@@ -416,10 +418,29 @@ export class SceneManager {
     return e.pointerType === 'touch' || e.pointerType === 'pen'
   }
 
-  private getAttachmentCards(groupId: string) {
+  private getPointerDragThreshold(e: PointerEvent) {
+    return this.isTouchLikePointer(e)
+      ? TOUCH_DRAG_THRESHOLD_PX
+      : POINTER_DRAG_THRESHOLD_PX
+  }
+
+  private getAttachmentGroupCards(groupId: string) {
     return useGameStore.getState().cards
-      .filter((card) => card.attachmentGroupId === groupId && card.location === 'table')
+      .filter((card) => card.attachmentGroupId === groupId)
       .sort((left, right) => (left.attachmentIndex ?? 0) - (right.attachmentIndex ?? 0))
+  }
+
+  private getAttachmentCards(groupId: string) {
+    return this.getAttachmentGroupCards(groupId).filter((card) => card.location === 'table')
+  }
+
+  private getSequenceAttachmentGroupId(deckId: string) {
+    const store = useGameStore.getState()
+    const deck = store.decks.find((entry) => entry.id === deckId && entry.kind === 'sequence')
+    const topCardId = deck?.cardIds[0]
+    return topCardId
+      ? store.cards.find((card) => card.id === topCardId)?.attachmentGroupId ?? null
+      : null
   }
 
   private getSelectionItemsForCard(cardId: string): SelectionItem[] {
@@ -437,6 +458,12 @@ export class SceneManager {
     }
 
     if (card.attachmentGroupId) {
+      const attachmentGroup = this.getAttachmentGroupCards(card.attachmentGroupId)
+      const anchorCard = attachmentGroup[0]
+      if (anchorCard?.location === 'deck') {
+        const deck = store.decks.find((entry) => entry.cardIds.includes(anchorCard.id))
+        return deck ? [{ id: deck.id, kind: 'deck' as const }] : []
+      }
       return this.getAttachmentCards(card.attachmentGroupId).map((entry) => ({ id: entry.id, kind: 'card' as const }))
     }
 
@@ -590,8 +617,9 @@ export class SceneManager {
     this.pointer.copy(this.getPointerCoords(e));
     const store = useGameStore.getState();
     const dist = Math.hypot(e.clientX - this.dragStartClientPos.x, e.clientY - this.dragStartClientPos.y);
+    const dragThreshold = this.getPointerDragThreshold(e)
 
-    if (this.isPendingMarquee && dist > 5 && !this.isMarqueeSelecting) {
+    if (this.isPendingMarquee && dist > dragThreshold && !this.isMarqueeSelecting) {
       this.isMarqueeSelecting = true
       store.startMarqueeSelection(this.dragStartClientPos.x, this.dragStartClientPos.y, this.isAdditiveSelectionEvent(e))
     }
@@ -603,7 +631,7 @@ export class SceneManager {
       return
     }
 
-    if (this.pendingSelectionItem && dist > 5 && !this.activeDragCardId && !this.activeDragDeckId) {
+    if (this.pendingSelectionItem && dist > dragThreshold && !this.activeDragCardId && !this.activeDragDeckId) {
       const dragItems = this.resolveSelectionDragItems(this.pendingSelectionItem, this.pendingSelectionItems)
       const shouldUseSingleCardDrag = this.shouldBeginSingleCardDrag(
         this.pendingSelectionItem,
@@ -894,6 +922,7 @@ export class SceneManager {
     this.scheduleRender()
     const store = useGameStore.getState();
     const dist = Math.hypot(e.clientX - this.dragStartClientPos.x, e.clientY - this.dragStartClientPos.y);
+    const dragThreshold = this.getPointerDragThreshold(e)
     const now = performance.now();
     const draggedDeckCardIds = this.activeDragDeckId
       ? [...(store.decks.find((deck) => deck.id === this.activeDragDeckId)?.cardIds ?? [])]
@@ -961,7 +990,7 @@ export class SceneManager {
     }
 
     if (!this.activeDragCardId && !this.activeDragDeckId && !this.isGroupDrag) {
-      if (this.isPendingMarquee && dist < 5) {
+      if (this.isPendingMarquee && dist < dragThreshold) {
         store.clearSelection()
         store.setFocusedCard(null)
         if (this.isTouchLikePointer(e) && store.hoveredCardId !== null) {
@@ -982,7 +1011,7 @@ export class SceneManager {
 
     this.lastClickTime = 0;
 
-    if (this.activeDragCardId && this.isTouchLikePointer(e) && dist < 5) {
+    if (this.activeDragCardId && this.isTouchLikePointer(e) && dist < dragThreshold) {
       const tappedCard = store.cards.find((card) => card.id === this.activeDragCardId)
       if (tappedCard?.location === 'hand') {
         const isSameCard = store.focusedCardId === tappedCard.id
@@ -1450,6 +1479,7 @@ export class SceneManager {
         && entry.item.id === item.id
       ))?.deckCardIds ?? []
       const deckCardIds = deck?.cardIds ?? originDeckCardIds
+      const sequenceAttachmentGroupId = deck ? this.getSequenceAttachmentGroupId(deck.id) : null
       deckCardIds.forEach((cardId) => {
         const card3D = this.cards.get(cardId)
         if (card3D) {
@@ -1457,6 +1487,15 @@ export class SceneManager {
           if (dragging) card3D.setRenderOrder(DRAG_RENDER_ORDER)
         }
       })
+      if (sequenceAttachmentGroupId) {
+        this.getAttachmentCards(sequenceAttachmentGroupId).forEach((card) => {
+          const card3D = this.cards.get(card.id)
+          if (card3D) {
+            card3D.setDragging(dragging)
+            if (dragging) card3D.setRenderOrder(DRAG_RENDER_ORDER)
+          }
+        })
+      }
     })
   }
 
@@ -1496,6 +1535,7 @@ export class SceneManager {
       const deckTopCard = deckTopCardId
         ? store.cards.find((card) => card.id === deckTopCardId) ?? null
         : null
+      const sequenceAttachmentGroupId = deck.kind === 'sequence' ? this.getSequenceAttachmentGroupId(deck.id) : null
       deck.cardIds.forEach((cardId, index) => {
         const card3D = this.cards.get(cardId)
         const cardModel = store.cards.find((card) => card.id === cardId)
@@ -1510,11 +1550,23 @@ export class SceneManager {
           ...cardModel,
           rotation: deck.rotation,
           faceUp: deckTopCard?.faceUp ?? cardModel.faceUp,
-          tapped: deckTopCard?.tapped ?? cardModel.tapped,
+          tapped: deck.tapped,
         }, 0, 0.3, wobble)
         card3D.group.rotation.set(dragEuler.x, dragEuler.y, dragEuler.z)
         card3D.group.scale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE)
       })
+      if (sequenceAttachmentGroupId) {
+        this.getAttachmentCards(sequenceAttachmentGroupId).forEach((card) => {
+          const card3D = this.cards.get(card.id)
+          if (!card3D) return
+          const attachmentIndex = card.attachmentIndex ?? 0
+          const attachedPosition = computeAttachedCardPosition([baseX, DRAG_PLANE_Y, baseZ], attachmentIndex, deck.rotation)
+          const dragEuler = getCardTableEuler({ ...card, rotation: deck.rotation }, 0, 0.3)
+          card3D.group.position.set(attachedPosition[0], DRAG_PLANE_Y - attachmentIndex * 0.02, attachedPosition[2])
+          card3D.group.rotation.set(dragEuler.x, dragEuler.y, dragEuler.z)
+          card3D.group.scale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE)
+        })
+      }
     })
   }
 
@@ -1695,6 +1747,15 @@ export class SceneManager {
           box.union(new THREE.Box3().setFromObject(card3D.group))
         }
       })
+      const sequenceAttachmentGroupId = deck.kind === 'sequence' ? this.getSequenceAttachmentGroupId(deck.id) : null
+      if (sequenceAttachmentGroupId) {
+        this.getAttachmentCards(sequenceAttachmentGroupId).forEach((card) => {
+          const card3D = this.cards.get(card.id)
+          if (card3D) {
+            box.union(new THREE.Box3().setFromObject(card3D.group))
+          }
+        })
+      }
     }
 
     if (box.isEmpty()) return null
@@ -2111,6 +2172,7 @@ export class SceneManager {
         kind: sourceDeck.kind,
         position: [...sourceDeck.position],
         rotation: [...sourceDeck.rotation],
+        tapped: sourceDeck.tapped,
         cardIds: [...sourceDeck.cardIds],
         laneId: sourceDeck.laneId,
         regionId: sourceDeck.regionId,
@@ -2155,6 +2217,7 @@ export class SceneManager {
               ...deck,
               position: [...sourceDeck.position],
               rotation: [...sourceDeck.rotation],
+              tapped: sourceDeck.tapped,
               cardIds: [...sourceDeck.cardIds],
               laneId: sourceDeck.laneId,
               regionId: sourceDeck.regionId,
@@ -2165,6 +2228,7 @@ export class SceneManager {
                 ...sourceDeck,
                 position: [...sourceDeck.position],
                 rotation: [...sourceDeck.rotation],
+                tapped: sourceDeck.tapped,
                 cardIds: [...sourceDeck.cardIds],
               },
             ],
@@ -2176,6 +2240,7 @@ export class SceneManager {
               location: 'deck',
               position: [...sourceDeck.position],
               rotation: [...sourceDeck.rotation],
+              tapped: false,
               laneId: undefined,
               regionId: undefined,
             };
@@ -2668,12 +2733,19 @@ export class SceneManager {
           const attachmentCards = attachmentGroups.get(cardData.attachmentGroupId) ?? []
           const anchorCard = attachmentCards[0]
           if (anchorCard) {
-            const laneForAnchor = anchorCard.laneId ? (laneById.get(anchorCard.laneId) ?? null) : null
-            let anchorPosition: [number, number, number] = [...anchorCard.position]
+            const anchorDeck = anchorCard.location === 'deck'
+              ? state.decks.find((deck) => deck.cardIds.includes(anchorCard.id)) ?? null
+              : null
+            const laneAnchorId = anchorDeck?.id ?? anchorCard.id
+            const laneForAnchor = (anchorDeck?.laneId ?? anchorCard.laneId)
+              ? (laneById.get(anchorDeck?.laneId ?? anchorCard.laneId ?? '') ?? null)
+              : null
+            let anchorPosition: [number, number, number] = [...(anchorDeck?.position ?? anchorCard.position)]
+            const anchorRotation = [...(anchorDeck?.rotation ?? anchorCard.rotation)] as [number, number, number]
 
             if (laneForAnchor) {
               const displayOrder = laneDisplayOrders.get(laneForAnchor.id) ?? laneForAnchor.itemOrder
-              const anchorSlotIndex = displayOrder.indexOf(anchorCard.id)
+              const anchorSlotIndex = displayOrder.indexOf(laneAnchorId)
               if (anchorSlotIndex !== -1) {
                 anchorPosition = computeLaneSlotPosition(laneForAnchor, anchorSlotIndex, state.cards, state.decks, displayOrder)
               }
@@ -2682,12 +2754,12 @@ export class SceneManager {
             const attachedPosition = computeAttachedCardPosition(
               anchorPosition,
               cardData.attachmentIndex ?? 0,
-              anchorCard.rotation,
+              anchorRotation,
             )
             const attachmentIndex = cardData.attachmentIndex ?? 0
             const stackLift = (attachmentCards.length - 1 - attachmentIndex) * 0.004
             card3D.targetPosition.set(attachedPosition[0], 0.01 + lift + stackLift, attachedPosition[2])
-            card3D.targetQuaternion.setFromEuler(getCardTableEuler(cardData, wiggleRot))
+            card3D.targetQuaternion.setFromEuler(getCardTableEuler({ ...cardData, rotation: anchorRotation }, wiggleRot))
             card3D.targetScale.set(TABLE_CARD_SCALE, TABLE_CARD_SCALE, TABLE_CARD_SCALE)
             continue
           }
@@ -2723,7 +2795,7 @@ export class SceneManager {
           ...cardData,
           rotation: deck.rotation,
           faceUp: deckTopCard?.faceUp ?? cardData.faceUp,
-          tapped: deckTopCard?.tapped ?? cardData.tapped,
+          tapped: deck.tapped,
         }
         // Check if deck is in a lane
         const laneForDeck = deck.laneId ? (laneById.get(deck.laneId) ?? null) : null;
@@ -2741,10 +2813,7 @@ export class SceneManager {
         } else if (deck.regionId) {
           const regionForDeck = regionById.get(deck.regionId);
           if (regionForDeck) {
-            const topCard = deck.cardIds.length > 0
-              ? cardById.get(getDeckTopCardId(deck) ?? '') ?? null
-              : null;
-            const regionPos = computeRegionCardPosition(regionForDeck, topCard?.tapped ?? false);
+            const regionPos = computeRegionCardPosition(regionForDeck, deck.tapped);
             deckBaseX = regionPos[0];
             deckBaseZ = regionPos[2];
           }

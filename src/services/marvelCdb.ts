@@ -57,7 +57,7 @@ export function getCardBackUrl(typeCode?: string): string {
     backImage = 'HeroBack.jpg';
   } else if (typeCode === 'villain') {
     backImage = 'VillainBack.jpg';
-  } else if (typeCode === 'treachery') {
+  } else if (typeCode === 'treachery' || typeCode === 'obligation') {
     backImage = 'EncounterBack.jpg';
   } else if (typeCode === 'hero' || typeCode === 'alter_ego' || typeCode === 'ally' || typeCode === 'event' || typeCode === 'resource' || typeCode === 'support') {
     // Other player cards should probably also use HeroBack

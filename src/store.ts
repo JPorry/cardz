@@ -102,6 +102,7 @@ export interface DeckState {
   kind: DeckKind
   position: [number, number, number]
   rotation: [number, number, number]
+  tapped: boolean
   cardIds: string[]
   laneId?: string
   regionId?: string
@@ -385,6 +386,17 @@ function getLaneItemExtents(
   }
 
   const width = getLaneItemWidth(itemId, cards, decks)
+  const deck = decks.find((entry) => entry.id === itemId)
+  const deckTopCard = deck ? getDeckTopCard(deck, cards) : undefined
+  if (deckTopCard?.attachmentGroupId) {
+    const baseWidth = getEffectiveCardDimensions(deckTopCard).width * TABLE_CARD_SCALE
+    const attachmentCards = getAttachmentGroupCards(cards, deckTopCard.attachmentGroupId)
+    const extraRight = ATTACHMENT_X_OFFSET * Math.max(0, attachmentCards.length - 1)
+    return {
+      left: baseWidth / 2,
+      right: baseWidth / 2 + extraRight,
+    }
+  }
   return {
     left: width / 2,
     right: width / 2,
@@ -403,6 +415,116 @@ export function getDeckTopCardId(deck: DeckState): string | undefined {
     : deck.cardIds[deck.cardIds.length - 1]
 }
 
+function getDeckForCardId(decks: DeckState[], cardId: string): DeckState | undefined {
+  return decks.find((deck) => deck.cardIds.includes(cardId))
+}
+
+function getSequenceDeckForCardId(decks: DeckState[], cardId: string): DeckState | undefined {
+  const deck = getDeckForCardId(decks, cardId)
+  return deck?.kind === 'sequence' && getDeckTopCardId(deck) === cardId
+    ? deck
+    : undefined
+}
+
+function isCardAttachable(card: CardState, decks: DeckState[]): boolean {
+  if (card.location === 'table') return true
+  return Boolean(getSequenceDeckForCardId(decks, card.id))
+}
+
+function getAttachmentAnchorState(
+  card: CardState,
+  decks: DeckState[],
+): {
+  position: [number, number, number]
+  rotation: [number, number, number]
+  laneId?: string
+  regionId?: string
+  itemId: string
+  anchoredToDeck: boolean
+} {
+  const sequenceDeck = getSequenceDeckForCardId(decks, card.id)
+  if (sequenceDeck) {
+    return {
+      position: [...sequenceDeck.position],
+      rotation: [...sequenceDeck.rotation],
+      laneId: sequenceDeck.laneId,
+      regionId: sequenceDeck.regionId,
+      itemId: sequenceDeck.id,
+      anchoredToDeck: true,
+    }
+  }
+
+  return {
+    position: [...card.position],
+    rotation: [...card.rotation],
+    laneId: card.laneId,
+    regionId: card.regionId,
+    itemId: card.id,
+    anchoredToDeck: false,
+  }
+}
+
+function syncAttachmentCardToAnchor(
+  card: CardState,
+  anchorState: ReturnType<typeof getAttachmentAnchorState>,
+  index: number,
+): CardState {
+  const laneId = anchorState.anchoredToDeck ? undefined : anchorState.laneId
+  const regionId = anchorState.anchoredToDeck ? undefined : anchorState.regionId
+  return {
+    ...card,
+    location: index === 0 && anchorState.anchoredToDeck ? 'deck' : 'table',
+    laneId,
+    regionId,
+    rotation: [...anchorState.rotation],
+    position: computeAttachedCardPosition(anchorState.position, index, anchorState.rotation),
+    attachmentIndex: index,
+  }
+}
+
+function rotateSequenceAttachmentGroup(
+  cards: CardState[],
+  deck: DeckState,
+  rotatedIds: string[],
+): CardState[] {
+  const previousTopCardId = getDeckTopCardId(deck)
+  const nextTopCardId = rotatedIds[0]
+  if (!previousTopCardId || !nextTopCardId || previousTopCardId === nextTopCardId) return cards
+
+  const previousTopCard = cards.find((card) => card.id === previousTopCardId)
+  if (!previousTopCard?.attachmentGroupId) return cards
+
+  const attachmentGroupId = previousTopCard.attachmentGroupId
+  const anchorState = {
+    position: [...deck.position] as [number, number, number],
+    rotation: [...deck.rotation] as [number, number, number],
+    laneId: deck.laneId,
+    regionId: deck.regionId,
+    itemId: deck.id,
+    anchoredToDeck: true,
+  }
+
+  return cards.map((card) => {
+    if (card.id === previousTopCardId) {
+      return {
+        ...card,
+        attachmentGroupId: undefined,
+        attachmentIndex: undefined,
+      }
+    }
+
+    if (card.id === nextTopCardId) {
+      return {
+        ...syncAttachmentCardToAnchor(card, anchorState, 0),
+        attachmentGroupId,
+      }
+    }
+
+    if (card.attachmentGroupId !== attachmentGroupId) return card
+    return syncAttachmentCardToAnchor(card, anchorState, card.attachmentIndex ?? 0)
+  })
+}
+
 function getLaneItemWidth(
   itemId: string,
   cards: CardState[],
@@ -418,11 +540,12 @@ function getLaneItemWidth(
 
   const deck = decks.find((entry) => entry.id === itemId)
   if (deck) {
+    const displayCard = getDeckDisplayCard(deck, cards)
     const topCard = getDeckTopCard(deck, cards)
-    if (topCard) {
-      return getEffectiveCardDimensions(topCard).width * TABLE_CARD_SCALE
+    if (topCard?.attachmentGroupId) {
+      return getAttachmentGroupWidth(topCard, cards)
     }
-    return TABLE_CARD_WIDTH
+    return getEffectiveCardDimensions(displayCard).width * TABLE_CARD_SCALE
   }
 
   return TABLE_CARD_WIDTH
@@ -539,8 +662,37 @@ function applyFaceStateFromContainer<T extends { faceUp: boolean }>(
   return flipped === undefined ? item : { ...item, faceUp: !flipped };
 }
 
-function normalizeCardForDeck<T extends CardState>(card: T): T {
-  return card
+function getDefaultDeckPresentation(
+  regionId?: string,
+  kind: DeckKind = 'stack',
+): Pick<DeckState, 'rotation' | 'tapped'> {
+  return {
+    rotation: [0, 0, 0],
+    tapped: kind === 'sequence' && regionId === 'region-main-scheme',
+  }
+}
+
+function normalizeCardForDeck<T extends CardState>(
+  card: T,
+  rotation: [number, number, number] = [0, 0, 0],
+): T {
+  return {
+    ...card,
+    rotation: [...rotation],
+    tapped: false,
+  }
+}
+
+function getDeckDisplayCard(
+  deck: DeckState,
+  cards: CardState[],
+): Pick<CardState, 'rotation' | 'faceUp' | 'tapped'> {
+  const topCard = getDeckTopCard(deck, cards)
+  return {
+    rotation: [...deck.rotation],
+    faceUp: topCard?.faceUp ?? false,
+    tapped: deck.tapped,
+  }
 }
 
 function selectionItemsEqual(a: SelectionItem, b: SelectionItem): boolean {
@@ -604,15 +756,14 @@ function prepareCardsForRegion(
 ): CardState[] {
   return cards.map((card) => (
     applyFaceStateFromContainer(
-      {
+      normalizeCardForDeck({
         ...card,
         location: 'deck' as const,
         laneId: undefined,
         regionId: undefined,
-        position: computeRegionCardPosition(region, card.tapped ?? false),
-        rotation: [0, 0, 0] as [number, number, number],
+        position: computeRegionCardPosition(region),
         faceUp: false,
-      },
+      }, [0, 0, 0]),
       lanes,
       regions,
       undefined,
@@ -707,9 +858,19 @@ function buildRegionSettlement(
   const position = getRegionPosition(state.regions, regionId)
   if (!position) return {}
 
-  const normalizedRotation: [number, number, number] = [0, 0, 0]
   const cardIds = orderedCardIds.filter((cardId, index) => orderedCardIds.indexOf(cardId) === index)
   const cardIdSet = new Set(cardIds)
+  const preferredDeck = preferredDeckId
+    ? state.decks.find((deck) => deck.id === preferredDeckId)
+    : undefined
+  const preferredDeckKind = preferredDeck?.kind ?? 'stack'
+  const presentation = preferredDeck?.regionId === regionId
+    ? {
+        rotation: [...preferredDeck.rotation] as [number, number, number],
+        tapped: preferredDeck.tapped,
+      }
+    : getDefaultDeckPresentation(regionId, preferredDeckKind)
+  const normalizedRotation = [...presentation.rotation] as [number, number, number]
 
   if (cardIds.length === 0) {
     return {
@@ -755,14 +916,12 @@ function buildRegionSettlement(
   }
 
   const deckId = preferredDeckId ?? `deck-${Date.now()}`
-  const preferredDeckKind = preferredDeckId
-    ? state.decks.find((deck) => deck.id === preferredDeckId)?.kind
-    : undefined
   const nextDeck: DeckState = {
     id: deckId,
-    kind: preferredDeckKind ?? 'stack',
+    kind: preferredDeckKind,
     position: [...position],
     rotation: [...normalizedRotation],
+    tapped: presentation.tapped,
     cardIds,
     regionId,
   }
@@ -782,10 +941,9 @@ function buildRegionSettlement(
               laneId: undefined,
               regionId: undefined,
               position: [...position],
-              rotation: [...normalizedRotation],
               attachmentGroupId: undefined,
               attachmentIndex: undefined,
-            }),
+            }, normalizedRotation),
             state.lanes,
             state.regions,
             undefined,
@@ -1138,7 +1296,11 @@ export const useGameStore = create<GameState>((set, get) => ({
       if (!deck) return state;
 
       return {
-        cards: state.cards.map((c) => (deck.cardIds.includes(c.id) ? { ...c, tapped: !c.tapped } : c)),
+        decks: state.decks.map((entry) => (
+          entry.id === deckId
+            ? { ...entry, tapped: !entry.tapped }
+            : entry
+        )),
       };
     }),
   advanceStack: (deckId) =>
@@ -1162,6 +1324,7 @@ export const useGameStore = create<GameState>((set, get) => ({
 
       const rotatedIds = rotateDeckCardIds(deck.cardIds, 'next')
       const examinedOrder = toExaminedCardOrder(rotatedIds)
+      const rotatedCards = rotateSequenceAttachmentGroup(state.cards, deck, rotatedIds)
 
       return {
         decks: state.decks.map((entry) => (
@@ -1169,6 +1332,7 @@ export const useGameStore = create<GameState>((set, get) => ({
             ? { ...entry, cardIds: rotatedIds }
             : entry
         )),
+        cards: rotatedCards,
         examinedStack: state.examinedStack?.deckId === deckId
           ? {
               ...state.examinedStack,
@@ -1185,6 +1349,7 @@ export const useGameStore = create<GameState>((set, get) => ({
 
       const rotatedIds = rotateDeckCardIds(deck.cardIds, 'previous')
       const examinedOrder = toExaminedCardOrder(rotatedIds)
+      const rotatedCards = rotateSequenceAttachmentGroup(state.cards, deck, rotatedIds)
 
       return {
         decks: state.decks.map((entry) => (
@@ -1192,6 +1357,7 @@ export const useGameStore = create<GameState>((set, get) => ({
             ? { ...entry, cardIds: rotatedIds }
             : entry
         )),
+        cards: rotatedCards,
         examinedStack: state.examinedStack?.deckId === deckId
           ? {
               ...state.examinedStack,
@@ -1207,9 +1373,10 @@ export const useGameStore = create<GameState>((set, get) => ({
       const orderedCards = cardIds
         .map((cardId) => state.cards.find((card) => card.id === cardId))
         .filter((card): card is CardState => Boolean(card))
-        .filter((card) => card.location === 'table' && !card.regionId)
+        .filter((card) => isCardAttachable(card, state.decks))
 
       if (orderedCards.length < 2) return state
+      if (orderedCards.filter((card) => getSequenceDeckForCardId(state.decks, card.id)).length > 1) return state
 
       const existingGroupIds = new Set(
         orderedCards
@@ -1233,21 +1400,31 @@ export const useGameStore = create<GameState>((set, get) => ({
 
       newGroupId = existingGroupId ?? `attachment-${Date.now()}`
       const targetIds = new Set(nextOrderedCards.map((card) => card.id))
-      const anchorRotation = [...anchorCard.rotation] as [number, number, number]
-      const anchorPosition = [...anchorCard.position] as [number, number, number]
-      const anchorLaneId = anchorCard.laneId
-      const anchorRegionId = anchorCard.regionId
-      const anchorLaneIndex = anchorLaneId
-        ? state.lanes.find((lane) => lane.id === anchorLaneId)?.itemOrder.indexOf(anchorCard.id)
+      const anchorState = getAttachmentAnchorState(anchorCard, state.decks)
+      const anchorLaneIndex = anchorState.laneId
+        ? state.lanes.find((lane) => lane.id === anchorState.laneId)?.itemOrder.indexOf(anchorState.itemId)
         : undefined
 
       return {
         lanes: state.lanes.map((lane) => {
-          if (!targetIds.has(anchorCard.id)) return lane
-          if (lane.id !== anchorLaneId) {
+          const looseTargetIds = nextOrderedCards
+            .filter((card) => card.id !== anchorCard.id)
+            .map((card) => card.id)
+          if (!looseTargetIds.some((cardId) => lane.itemOrder.includes(cardId)) && lane.id !== anchorState.laneId) {
+            return lane
+          }
+
+          if (lane.id !== anchorState.laneId) {
             return {
               ...lane,
-              itemOrder: lane.itemOrder.filter((id) => !targetIds.has(id)),
+              itemOrder: lane.itemOrder.filter((id) => !looseTargetIds.includes(id)),
+            }
+          }
+
+          if (anchorState.anchoredToDeck) {
+            return {
+              ...lane,
+              itemOrder: lane.itemOrder.filter((id) => !looseTargetIds.includes(id)),
             }
           }
 
@@ -1265,17 +1442,13 @@ export const useGameStore = create<GameState>((set, get) => ({
           if (!targetIds.has(card.id)) return card
           const nextIndex = nextOrderedCards.findIndex((entry) => entry.id === card.id)
           return {
-            ...card,
-            location: 'table',
-            laneId: anchorLaneId,
-            regionId: anchorRegionId,
-            rotation: anchorRotation,
-            position: computeAttachedCardPosition(anchorPosition, nextIndex, anchorRotation),
+            ...syncAttachmentCardToAnchor(card, anchorState, nextIndex),
             attachmentGroupId: newGroupId ?? undefined,
-            attachmentIndex: nextIndex,
           }
         }),
-        selectedItems: nextOrderedCards.map((card) => ({ id: card.id, kind: 'card' as const })),
+        selectedItems: anchorState.anchoredToDeck
+          ? [{ id: anchorState.itemId, kind: 'deck' as const }]
+          : nextOrderedCards.map((card) => ({ id: card.id, kind: 'card' as const })),
       }
     })
     return newGroupId
@@ -1286,12 +1459,15 @@ export const useGameStore = create<GameState>((set, get) => ({
       if (groupCards.length === 0) return state
 
       const anchorCard = groupCards[0]
-      const anchorPosition = [...anchorCard.position] as [number, number, number]
-      const anchorRotation = [...anchorCard.rotation] as [number, number, number]
+      const anchorState = getAttachmentAnchorState(anchorCard, state.decks)
+      const anchorPosition = [...anchorState.position] as [number, number, number]
+      const anchorRotation = [...anchorState.rotation] as [number, number, number]
       const cardIdSet = new Set(groupCards.map((card) => card.id))
-      const laneId = anchorCard.laneId
+      const detachedGroupCards = anchorState.anchoredToDeck ? groupCards.slice(1) : groupCards
+      const detachedCardIdSet = new Set(detachedGroupCards.map((card) => card.id))
+      const laneId = anchorState.laneId
       const lane = laneId ? state.lanes.find((entry) => entry.id === laneId) : undefined
-      const anchorLaneIndex = lane ? lane.itemOrder.indexOf(anchorCard.id) : -1
+      const anchorLaneIndex = lane ? lane.itemOrder.indexOf(anchorState.itemId) : -1
       const detachedCards = state.cards.map((card) => (
         cardIdSet.has(card.id)
           ? { ...card, attachmentGroupId: undefined, attachmentIndex: undefined }
@@ -1300,8 +1476,15 @@ export const useGameStore = create<GameState>((set, get) => ({
       const nextLanes = state.lanes.map((entry) => {
         if (entry.id !== laneId) return entry
         const nextOrder = [...entry.itemOrder]
-        const anchorIndex = nextOrder.indexOf(anchorCard.id)
+        const anchorIndex = nextOrder.indexOf(anchorState.itemId)
         if (anchorIndex === -1) return entry
+        if (anchorState.anchoredToDeck) {
+          nextOrder.splice(anchorIndex + 1, 0, ...detachedGroupCards.map((card) => card.id))
+          return {
+            ...entry,
+            itemOrder: nextOrder,
+          }
+        }
         nextOrder.splice(anchorIndex, 1, ...groupCards.map((card) => card.id))
         return {
           ...entry,
@@ -1315,12 +1498,30 @@ export const useGameStore = create<GameState>((set, get) => ({
         cards: state.cards.map((card) => {
           if (!cardIdSet.has(card.id)) return card
           const index = groupCards.findIndex((entry) => entry.id === card.id)
-          const slotPosition = nextLane && anchorLaneIndex !== -1
-            ? computeLaneSlotPosition(nextLane, anchorLaneIndex + index, detachedCards, state.decks, nextLane.itemOrder)
+          if (anchorState.anchoredToDeck && index === 0) {
+            return {
+              ...card,
+              attachmentGroupId: undefined,
+              attachmentIndex: undefined,
+            }
+          }
+          const detachedLaneIndex = detachedGroupCards.findIndex((entry) => entry.id === card.id)
+          const slotPosition = nextLane && anchorLaneIndex !== -1 && detachedCardIdSet.has(card.id)
+            ? computeLaneSlotPosition(
+                nextLane,
+                anchorState.anchoredToDeck ? anchorLaneIndex + 1 + detachedLaneIndex : anchorLaneIndex + index,
+                detachedCards,
+                state.decks,
+                nextLane.itemOrder,
+              )
             : null
+          const detachedIndex = anchorState.anchoredToDeck ? index + 1 : index
           return {
             ...card,
-            position: slotPosition ?? computeDetachedCardPosition(anchorPosition, index, anchorRotation),
+            location: 'table',
+            laneId: laneId || undefined,
+            regionId: undefined,
+            position: slotPosition ?? computeDetachedCardPosition(anchorPosition, detachedIndex, anchorRotation),
             rotation: anchorRotation,
             attachmentGroupId: undefined,
             attachmentIndex: undefined,
@@ -1383,7 +1584,13 @@ export const useGameStore = create<GameState>((set, get) => ({
       const laneId = targetContext?.laneId ?? anchorCard.laneId
       const regionId = targetContext?.regionId ?? anchorCard.regionId
       const deckPosition = targetContext?.position ?? [...anchorCard.position] as [number, number, number]
-      const deckRotation = targetContext?.rotation ?? [...anchorCard.rotation] as [number, number, number]
+      const deckPresentation = regionId
+        ? getDefaultDeckPresentation(regionId)
+        : {
+            rotation: targetContext?.rotation ?? [...anchorCard.rotation] as [number, number, number],
+            tapped: false,
+          }
+      const deckRotation = [...deckPresentation.rotation] as [number, number, number]
       const removedIds = orderedCards.map((card) => card.id)
 
       const nextDeck: DeckState = {
@@ -1391,6 +1598,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         kind: 'stack',
         position: [...deckPosition],
         rotation: [...deckRotation],
+        tapped: deckPresentation.tapped,
         cardIds: removedIds,
         laneId,
         regionId,
@@ -1422,8 +1630,7 @@ export const useGameStore = create<GameState>((set, get) => ({
                   attachmentGroupId: undefined,
                   attachmentIndex: undefined,
                   position: [...deckPosition],
-                  rotation: [...deckRotation],
-                }),
+                }, deckRotation),
                 state.lanes,
                 state.regions,
                 laneId,
@@ -1468,7 +1675,13 @@ export const useGameStore = create<GameState>((set, get) => ({
       const laneId = targetContext?.laneId ?? anchorCard.laneId
       const regionId = targetContext?.regionId ?? anchorCard.regionId
       const deckPosition = targetContext?.position ?? [...anchorCard.position] as [number, number, number]
-      const deckRotation = targetContext?.rotation ?? [...anchorCard.rotation] as [number, number, number]
+      const deckPresentation = regionId
+        ? getDefaultDeckPresentation(regionId)
+        : {
+            rotation: targetContext?.rotation ?? [...anchorCard.rotation] as [number, number, number],
+            tapped: false,
+          }
+      const deckRotation = [...deckPresentation.rotation] as [number, number, number]
       const removedItemIds = [...selection.cardIds, ...selection.deckIds]
 
       const nextDeck: DeckState = {
@@ -1476,6 +1689,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         kind: 'stack',
         position: [...deckPosition],
         rotation: [...deckRotation],
+        tapped: deckPresentation.tapped,
         cardIds: combinedCardIds,
         laneId,
         regionId,
@@ -1507,8 +1721,7 @@ export const useGameStore = create<GameState>((set, get) => ({
                   attachmentGroupId: undefined,
                   attachmentIndex: undefined,
                   position: [...deckPosition],
-                  rotation: [...deckRotation],
-                }),
+                }, deckRotation),
                 state.lanes,
                 state.regions,
                 laneId,
@@ -1692,13 +1905,17 @@ export const useGameStore = create<GameState>((set, get) => ({
 
       const laneId = c2.laneId;
       const regionId = c2.regionId;
+      const deckPresentation = regionId
+        ? getDefaultDeckPresentation(regionId)
+        : { rotation: [...c2.rotation] as [number, number, number], tapped: false }
       
       const newDeckId = `deck-${Date.now()}`
       const newDeck: DeckState = {
         id: newDeckId,
         kind: 'stack',
         position: [...c2.position], // place at card 2 position
-        rotation: [...c2.rotation],
+        rotation: [...deckPresentation.rotation],
+        tapped: deckPresentation.tapped,
         cardIds: [card2Id, card1Id], // card 2 on bottom, card 1 on top
         laneId, // Inherit the lane from the target card
         regionId // Inherit the region from the target card
@@ -1730,7 +1947,7 @@ export const useGameStore = create<GameState>((set, get) => ({
                   regionId: undefined,
                   attachmentGroupId: undefined,
                   attachmentIndex: undefined,
-                }),
+                }, newDeck.rotation),
                 state.lanes,
                 state.regions,
                 laneId,
@@ -1764,7 +1981,7 @@ export const useGameStore = create<GameState>((set, get) => ({
                   regionId: undefined,
                   attachmentGroupId: undefined,
                   attachmentIndex: undefined,
-                }),
+                }, targetDeck.rotation),
                 state.lanes,
                 state.regions,
                 targetDeck?.laneId,
@@ -1798,7 +2015,7 @@ export const useGameStore = create<GameState>((set, get) => ({
                   regionId: undefined,
                   attachmentGroupId: undefined,
                   attachmentIndex: undefined,
-                }),
+                }, targetDeck.rotation),
                 state.lanes,
                 state.regions,
                 targetDeck?.laneId,
@@ -1856,7 +2073,7 @@ export const useGameStore = create<GameState>((set, get) => ({
                   regionId: undefined,
                   attachmentGroupId: undefined,
                   attachmentIndex: undefined,
-                }),
+                }, targetDeck.rotation),
                 state.lanes,
                 state.regions,
                 targetDeck.laneId,
@@ -1904,6 +2121,7 @@ export const useGameStore = create<GameState>((set, get) => ({
               regionId: undefined,
               position: [...deck.position],
               rotation: [...deck.rotation],
+              tapped: false,
               attachmentGroupId: undefined,
               attachmentIndex: undefined,
             }
@@ -1916,6 +2134,7 @@ export const useGameStore = create<GameState>((set, get) => ({
               regionId: deck.regionId,
               position: [...deck.position],
               rotation: [...deck.rotation],
+              tapped: false,
               attachmentGroupId: undefined,
               attachmentIndex: undefined,
             }
@@ -1962,6 +2181,7 @@ export const useGameStore = create<GameState>((set, get) => ({
               regionId: undefined,
               position: [...deck.position],
               rotation: [...deck.rotation],
+              tapped: false,
               attachmentGroupId: undefined,
               attachmentIndex: undefined,
             }
@@ -1974,6 +2194,7 @@ export const useGameStore = create<GameState>((set, get) => ({
               regionId: deck.regionId,
               position: [...deck.position],
               rotation: [...deck.rotation],
+              tapped: false,
               attachmentGroupId: undefined,
               attachmentIndex: undefined,
             }
@@ -2006,6 +2227,12 @@ export const useGameStore = create<GameState>((set, get) => ({
     set((state) => {
       const deck = state.decks.find((d) => d.id === id);
       const cardIds = deck?.cardIds ?? [];
+      const nextRotation = rotation ? [...rotation] as [number, number, number] : [...(deck?.rotation ?? [0, 0, 0])] as [number, number, number]
+      const nextPosition = position ? [...position] as [number, number, number] : [...(deck?.position ?? [0, 0, 0])] as [number, number, number]
+      const sequenceTopCardId = deck?.kind === 'sequence' ? getDeckTopCardId(deck) : undefined
+      const sequenceAttachmentGroupId = sequenceTopCardId
+        ? state.cards.find((card) => card.id === sequenceTopCardId)?.attachmentGroupId
+        : undefined
       return {
         decks: state.decks.map((d: DeckState) => {
           if (d.id !== id) return d
@@ -2013,20 +2240,31 @@ export const useGameStore = create<GameState>((set, get) => ({
             ...d,
             laneId: laneId || undefined,
             regionId: regionId || undefined,
-            position: position ? [...position] : [...d.position],
-            rotation: rotation ? [...rotation] : [...d.rotation],
+            position: nextPosition,
+            rotation: [...nextRotation],
           }
         }),
         cards: state.cards.map((card) => (
           cardIds.includes(card.id)
             ? applyFaceStateFromContainer(
-                { ...card },
+                normalizeCardForDeck({ ...card }, nextRotation),
                 state.lanes,
                 state.regions,
                 laneId,
                 regionId,
               )
-            : card
+            : (
+              sequenceAttachmentGroupId
+              && card.attachmentGroupId === sequenceAttachmentGroupId
+              ? {
+                  ...card,
+                  laneId: undefined,
+                  regionId: undefined,
+                  rotation: [...nextRotation],
+                  position: computeAttachedCardPosition(nextPosition, card.attachmentIndex ?? 0, nextRotation),
+                }
+              : card
+            )
         )),
       };
     })
@@ -2063,6 +2301,7 @@ export const useGameStore = create<GameState>((set, get) => ({
                 regionId: deck.regionId,
                 position: [...deck.position],
                 rotation: [...deck.rotation],
+                tapped: false,
                 attachmentGroupId: undefined,
                 attachmentIndex: undefined,
               }
@@ -2275,7 +2514,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         mainSchemeRegion,
         freshLanes,
         freshRegions,
-      ).map((card) => ({ ...card, tapped: true }))
+      )
       const preparedNemesisCards = prepareCardsForRegion(
         setup.nemesisDeckCards,
         nemesisDeckRegion,
@@ -2289,6 +2528,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           kind: 'stack' as const,
           position: computeRegionCardPosition(playerDeckRegion),
           rotation: [0, 0, 0] as [number, number, number],
+          tapped: false,
           cardIds: preparedPlayerDeckCards.map((card) => card.id),
           regionId: playerDeckRegion.id,
         },
@@ -2297,6 +2537,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           kind: 'stack' as const,
           position: computeRegionCardPosition(villainDeckRegion),
           rotation: [0, 0, 0] as [number, number, number],
+          tapped: false,
           cardIds: preparedVillainDeckCards.map((card) => card.id),
           regionId: villainDeckRegion.id,
         },
@@ -2305,6 +2546,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           kind: 'sequence' as const,
           position: computeLaneSlotPosition(villainAreaLane, 0, [], [], villainAreaOrder),
           rotation: [0, 0, 0] as [number, number, number],
+          tapped: false,
           cardIds: preparedVillainSequenceCards.map((card) => card.id),
           laneId: villainAreaLane.id,
         },
@@ -2313,6 +2555,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           kind: 'sequence' as const,
           position: computeRegionCardPosition(mainSchemeRegion, true),
           rotation: [0, 0, 0] as [number, number, number],
+          tapped: true,
           cardIds: preparedMainSchemeCards.map((card) => card.id),
           regionId: mainSchemeRegion.id,
         },
@@ -2321,6 +2564,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           kind: 'stack' as const,
           position: computeRegionCardPosition(nemesisDeckRegion),
           rotation: [0, 0, 0] as [number, number, number],
+          tapped: false,
           cardIds: preparedNemesisCards.map((card) => card.id),
           regionId: nemesisDeckRegion.id,
         },

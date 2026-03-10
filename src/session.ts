@@ -5,7 +5,7 @@ import { getDefaultGame, getGameDefinition } from './games/registry'
 import type { GameCardSemantics } from './games/types'
 import { normalizeCardCounters, normalizeCardStatuses } from './utils/cardMetadata'
 
-export const GAME_SESSION_VERSION = 5
+export const GAME_SESSION_VERSION = 6
 
 export interface SerializedGameSessionState {
   gameId: string
@@ -203,6 +203,7 @@ function parseDeckState(value: unknown): DeckState {
     kind: parseDeckKind(value.kind),
     position: parseTuple3(value.position, `deck ${value.id} position`),
     rotation: parseTuple3(value.rotation, `deck ${value.id} rotation`),
+    tapped: value.tapped === undefined ? false : Boolean(value.tapped),
     cardIds: parseStringArray(value.cardIds, `deck ${value.id} cardIds`),
     laneId: parseOptionalString(value.laneId),
     regionId: parseOptionalString(value.regionId),
@@ -397,6 +398,7 @@ function normalizeImportedDeckState(
       location: 'deck' as const,
       position: [...deck.position] as [number, number, number],
       rotation: [...deck.rotation] as [number, number, number],
+      tapped: false,
       laneId: undefined,
       regionId: undefined,
       attachmentGroupId: undefined,
@@ -500,7 +502,7 @@ export function parseSerializedGameSession(value: unknown): SerializedGameSessio
     throw new Error('Invalid session payload.')
   }
 
-  if (value.version !== 1 && value.version !== 3 && value.version !== GAME_SESSION_VERSION) {
+  if (value.version !== 1 && value.version !== 3 && value.version !== 5 && value.version !== GAME_SESSION_VERSION) {
     throw new Error(`Unsupported session version: ${String(value.version)}`)
   }
 
