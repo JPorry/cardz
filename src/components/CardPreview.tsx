@@ -124,6 +124,10 @@ function getTouchPreviewTitle(
   return `${selectedItems.length} Selected`
 }
 
+function canQuickPreviewCard(card?: { location?: string } | null) {
+  return !!card && card.location !== 'hand'
+}
+
 export const CardPreview: React.FC = () => {
   const {
     activeGameId,
@@ -187,14 +191,15 @@ export const CardPreview: React.FC = () => {
     ? (touchQuickPreviewCardId ?? getSelectionPreviewCardId({ activeGameId, cards, decks }, touchPreviewSelection, focusedCardId))
     : null
   const touchSelectedCard = cards.find((c) => c.id === selectedPreviewCardId)
-  const quickPreviewCard = supportsHoverPreview ? hoveredCard : touchSelectedCard
+  const quickPreviewSourceCard = supportsHoverPreview ? hoveredCard : touchSelectedCard
+  const quickPreviewCard = canQuickPreviewCard(quickPreviewSourceCard) ? quickPreviewSourceCard : null
   const quickPreviewScreenX = supportsHoverPreview
     ? hoveredCardScreenX
     : selectionBounds
       ? selectionBounds.x + selectionBounds.width / 2
       : window.innerWidth / 2
   const previewCard = cards.find((c) => c.id === previewCardId)
-  const getVisibleArtworkUrl = (card?: typeof hoveredCard) => {
+  const getVisibleArtworkUrl = (card?: typeof hoveredCard | null) => {
     if (!card) return undefined
     return card.faceUp
       ? card.artworkUrl
@@ -235,7 +240,7 @@ export const CardPreview: React.FC = () => {
   const previewAspectRatio = getAspectRatio(previewArtworkUrl)
   const quickPreviewAspectRatio = getAspectRatio(quickPreviewArtworkUrl)
   const touchActionPanelOverlap = quickPreviewAspectRatio > 1 ? 24 : 68
-  const showTouchQuickPreview = !!touchActionSet && touchActionSet.actions.length > 0 && canShowTouchPreview
+  const showTouchQuickPreview = !!quickPreviewCard && !!touchActionSet && touchActionSet.actions.length > 0 && canShowTouchPreview
   const showHoverPreview = !!quickPreviewCard && !previewCardId && supportsHoverPreview && quickPreviewArtworkUrl
   const isHoveredLeft = quickPreviewScreenX !== null && quickPreviewScreenX < window.innerWidth / 2
   const showBigPreview = !!previewCard

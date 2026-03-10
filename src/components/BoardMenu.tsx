@@ -17,7 +17,12 @@ interface BoardMenuProps {
   onOpenKeyboardShortcuts: () => void
 }
 
-export function BoardMenu({ onStartNewGame, onExportState, onLoadState, onOpenKeyboardShortcuts }: BoardMenuProps) {
+export function BoardMenu({
+  onStartNewGame,
+  onExportState,
+  onLoadState,
+  onOpenKeyboardShortcuts,
+}: BoardMenuProps) {
   const [isOpen, setIsOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)

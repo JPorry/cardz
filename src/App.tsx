@@ -18,6 +18,7 @@ function createSessionFileName(gameId: string) {
 
 function App() {
   const containerRef = useRef<HTMLDivElement>(null)
+  const sceneManagerRef = useRef<SceneManager | null>(null)
   const [isNewGameOpen, setIsNewGameOpen] = useState(false)
   const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false)
   const isExaminingStack = useGameStore((state) => state.examinedStack !== null)
@@ -33,9 +34,11 @@ function App() {
 
     // Initialize our imperative THREE.js logic
     const sceneManager = new SceneManager(containerRef.current)
+    sceneManagerRef.current = sceneManager
 
     // Cleanup on unmount
     return () => {
+      sceneManagerRef.current = null
       stopAutosave()
       sceneManager.destroy()
     }

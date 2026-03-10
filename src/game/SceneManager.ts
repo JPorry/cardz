@@ -21,6 +21,7 @@ const HAND_VIEWPORT_PADDING = 0.4;
 const DRAG_RENDER_ORDER = 20000;
 const BOARD_SIDE_MARGIN_PX = 20;
 const TABLE_CENTER_Z = -3;
+const TABLE_CORNER_RADIUS = 1.7;
 
 type DraggedCardOrigin = {
   cardId: string;
@@ -154,14 +155,16 @@ export class SceneManager {
     // Setup Raycaster
     this.raycaster = new THREE.Raycaster();
 
-    this.scene.background = new THREE.Color(0x252a36);
+    this.scene.background = null;
     
     // Lights (adjusted to make shadows more transparent and softer)
     this.addSceneLights(this.scene);
     this.addSceneLights(this.overlayScene);
 
     // Table
-    this.table = new Table3D(this.boardConfig);
+    this.table = new Table3D(this.boardConfig, () => {
+      this.invalidateRender()
+    });
     this.scene.add(this.table.mesh);
     this.examineStrip = new ExamineStrip3D(this.boardConfig);
     this.examineStrip.group.visible = false;
@@ -253,6 +256,58 @@ export class SceneManager {
     dirLight.shadow.bias = -0.001
     dirLight.shadow.radius = 8
     targetScene.add(dirLight)
+  }
+
+  downloadTableTemplate() {
+    const width = 2048
+    const padding = 96
+    const boardWidth = this.boardConfig.width
+    const boardDepth = this.boardConfig.depth
+    const drawableWidth = width - padding * 2
+    const scale = drawableWidth / boardWidth
+    const height = Math.ceil(boardDepth * scale + padding * 2)
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+
+    const context = canvas.getContext('2d')
+    if (!context) return
+
+    const rectWidth = boardWidth * scale
+    const rectHeight = boardDepth * scale
+    const radius = Math.min(TABLE_CORNER_RADIUS * scale, rectWidth / 2, rectHeight / 2)
+    const x = (width - rectWidth) / 2
+    const y = (height - rectHeight) / 2
+
+    context.clearRect(0, 0, width, height)
+    context.beginPath()
+    context.moveTo(x + radius, y)
+    context.lineTo(x + rectWidth - radius, y)
+    context.quadraticCurveTo(x + rectWidth, y, x + rectWidth, y + radius)
+    context.lineTo(x + rectWidth, y + rectHeight - radius)
+    context.quadraticCurveTo(x + rectWidth, y + rectHeight, x + rectWidth - radius, y + rectHeight)
+    context.lineTo(x + radius, y + rectHeight)
+    context.quadraticCurveTo(x, y + rectHeight, x, y + rectHeight - radius)
+    context.lineTo(x, y + radius)
+    context.quadraticCurveTo(x, y, x + radius, y)
+    context.closePath()
+    context.fillStyle = '#ffffff'
+    context.fill()
+    context.lineWidth = 4
+    context.strokeStyle = 'rgba(0, 0, 0, 0.55)'
+    context.stroke()
+
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.download = 'table-template-top-down.png'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(downloadUrl)
+    }, 'image/png')
   }
 
   private getViewportDimensions() {
@@ -718,17 +773,18 @@ export class SceneManager {
         const cardId = obj?.userData?.cardId;
         if (cardId) {
           const card = store.cards.find(c => c.id === cardId);
-          const eligibleShortcutCard = this.getHoveredShortcutCard(cardId)
+          const previewEligible = card?.location !== 'hand'
+          const eligibleShortcutCard = previewEligible ? this.getHoveredShortcutCard(cardId) : null
           const hoverZone = eligibleShortcutCard
             ? this.getHoverZoneFromIntersection(eligibleShortcutCard, intersects[0])
             : null
 
           if (
-            store.hoveredCardId !== cardId
+            store.hoveredCardId !== (previewEligible ? cardId : null)
             || store.hoveredCardScreenX !== e.clientX
             || store.hoveredCardZone !== hoverZone
           ) {
-            store.setHoveredCard(cardId, e.clientX, hoverZone);
+            store.setHoveredCard(previewEligible ? cardId : null, previewEligible ? e.clientX : null, hoverZone);
           }
           
           // Focus hand cards on hover for desktop
@@ -877,7 +933,7 @@ export class SceneManager {
 
       if (this.isTouchLikePointer(e)) {
         const tappedCard = this.pendingCardId ? store.cards.find((card) => card.id === this.pendingCardId) : null
-        if (tappedCard?.attachmentGroupId) {
+        if (tappedCard?.attachmentGroupId && tappedCard.location !== 'hand') {
           store.setTouchQuickPreviewCard(this.pendingCardId)
         } else {
           store.clearTouchQuickPreview()
@@ -929,9 +985,10 @@ export class SceneManager {
     if (this.activeDragCardId && this.isTouchLikePointer(e) && dist < 5) {
       const tappedCard = store.cards.find((card) => card.id === this.activeDragCardId)
       if (tappedCard?.location === 'hand') {
-        const isSameCard = store.hoveredCardId === tappedCard.id
-        store.setHoveredCard(isSameCard ? null : tappedCard.id, isSameCard ? null : e.clientX)
+        const isSameCard = store.focusedCardId === tappedCard.id
+        store.setHoveredCard(null)
         store.setFocusedCard(isSameCard ? null : tappedCard.id)
+        store.clearTouchQuickPreview()
         this.clearHandPreview()
 
         const card3D = this.cards.get(this.activeDragCardId)
@@ -2363,7 +2420,9 @@ export class SceneManager {
     this.overlayScene.remove(this.examineStrip.group)
     this.table.dispose()
     this.examineStrip.dispose()
-    this.table = new Table3D(this.boardConfig)
+    this.table = new Table3D(this.boardConfig, () => {
+      this.invalidateRender()
+    })
     this.scene.add(this.table.mesh)
     this.examineStrip = new ExamineStrip3D(this.boardConfig)
     this.examineStrip.group.visible = false

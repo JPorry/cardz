@@ -55,7 +55,7 @@ export class Lane3D {
   fillMesh: THREE.Mesh;
   highlightMesh: THREE.Mesh;
   labelMesh: THREE.Mesh;
-  fillMaterial: THREE.MeshPhysicalMaterial;
+  fillMaterial: THREE.MeshBasicMaterial;
   highlightMaterial: THREE.MeshBasicMaterial;
   borderMaterial: THREE.LineBasicMaterial;
   glowBorderMaterial: THREE.LineBasicMaterial;
@@ -72,17 +72,12 @@ export class Lane3D {
 
     const fillGeometry = new THREE.ShapeGeometry(panelShape);
     fillGeometry.rotateX(-Math.PI / 2);
-    this.fillMaterial = new THREE.MeshPhysicalMaterial({
-      color: 0x374052,
+    this.fillMaterial = new THREE.MeshBasicMaterial({
+      color: 0x111111,
       transparent: true,
-      opacity: 0.08,
-      transmission: 0.45,
-      roughness: 0.08,
-      metalness: 0.02,
-      clearcoat: 1,
-      clearcoatRoughness: 0.1,
-      thickness: 0.45,
+      opacity: 0.3,
       depthWrite: false,
+      depthTest: true,
     });
     this.fillMesh = new THREE.Mesh(fillGeometry, this.fillMaterial);
     this.fillMesh.position.y = -0.001;

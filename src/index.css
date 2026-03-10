@@ -4,7 +4,9 @@ body, html, #root {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background-color: #1a1a1a;
+  background:
+    center / cover no-repeat url('./assets/background.png'),
+    #1a1a1a;
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
