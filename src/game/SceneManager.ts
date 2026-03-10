@@ -2693,7 +2693,7 @@ export class SceneManager {
       const inDeck = cardData.location === 'deck';
       const handIndex = cardData.location === 'hand' ? (handIndexMap.get(cardData.id) ?? -1) : -1
       const examinedIndex = examinedCardIndexMap.get(cardData.id) ?? -1
-      card3D.setOverlayRendering(examinedIndex >= 0)
+      card3D.setOverlayRendering(examinedIndex >= 0 || Boolean(cardData.attachmentGroupId))
       const deck = cardToDeckMap.get(cardData.id);
       const isVisibleDeckCard = Boolean(deck && getDeckTopCardId(deck) === cardData.id)
       const attachmentRenderOrder = examinedIndex >= 0
