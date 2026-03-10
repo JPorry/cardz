@@ -82,6 +82,29 @@ function getTouchPreviewSelection(
   return selectedItems[0] ?? null
 }
 
+function getTouchAttachmentPreviewCardId(
+  selectedItems: SelectionItem[],
+  cards: ReturnType<typeof useGameStore.getState>['cards'],
+  touchQuickPreviewCardId: string | null,
+): string | null {
+  if (!touchQuickPreviewCardId || selectedItems.length <= 1) return null
+  if (selectedItems.some((item) => item.kind !== 'card')) return null
+  if (!selectedItems.some((item) => item.id === touchQuickPreviewCardId)) return null
+
+  const selectedCards = selectedItems
+    .map((item) => cards.find((card) => card.id === item.id))
+    .filter((card): card is typeof cards[number] => Boolean(card))
+
+  if (selectedCards.length !== selectedItems.length) return null
+
+  const attachmentGroupId = selectedCards[0]?.attachmentGroupId
+  if (!attachmentGroupId) return null
+
+  return selectedCards.every((card) => card.attachmentGroupId === attachmentGroupId)
+    ? touchQuickPreviewCardId
+    : null
+}
+
 function getTouchPreviewTitle(
   selectedItems: SelectionItem[],
   quickPreviewCard?: { name?: string } | null,
@@ -135,9 +158,21 @@ export const CardPreview: React.FC = () => {
   const selectedDeck = selectedItems.length === 1 && selectedItems[0]?.kind === 'deck'
     ? decks.find((deck) => deck.id === selectedItems[0]?.id) ?? null
     : null
-  const canShowTouchPreview = !supportsHoverPreview && !previewCardId && !marqueeSelection.isActive && !isDragging && examinedStack === null
+  const touchAttachmentPreviewCardId = getTouchAttachmentPreviewCardId(selectedItems, cards, touchQuickPreviewCardId)
+  const canShowTouchPreview = (
+    !supportsHoverPreview
+    && (selectedItems.length === 1 || touchAttachmentPreviewCardId !== null)
+    && !previewCardId
+    && !marqueeSelection.isActive
+    && !isDragging
+    && examinedStack === null
+  )
   const touchPreviewSelection = canShowTouchPreview
-    ? getTouchPreviewSelection(selectedItems, focusedCardId, cards, decks, lanes, regions)
+    ? (
+        touchAttachmentPreviewCardId
+          ? { id: touchAttachmentPreviewCardId, kind: 'card' as const }
+          : getTouchPreviewSelection(selectedItems, focusedCardId, cards, decks, lanes, regions)
+      )
     : null
   const baseTouchActionSet = canShowTouchPreview && selectedItems.length > 0
     ? getSelectionActionSet(useGameStore.getState(), selectedItems)

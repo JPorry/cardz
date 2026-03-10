@@ -25,6 +25,7 @@ export function SelectionOverlay() {
   const isDragging = useGameStore((state) => state.isDragging)
   const menuActions = getSelectionActionSet(useGameStore.getState(), selectedItems).actions
   const supportsImmediateMenu = useSupportsHoverPreview()
+  const showTouchMultiSelectMenu = !supportsImmediateMenu && selectedItems.length > 1
   const [showMenu, setShowMenu] = useState(true)
   const [suppressedSelectionKey, setSuppressedSelectionKey] = useState<string | null>(null)
   const [dragSuppressedSelectionKey, setDragSuppressedSelectionKey] = useState<string | null>(null)
@@ -81,7 +82,7 @@ export function SelectionOverlay() {
       return
     }
 
-    if (!supportsImmediateMenu) {
+    if (!supportsImmediateMenu && !showTouchMultiSelectMenu) {
       setShowMenu(false)
       return
     }
@@ -92,7 +93,7 @@ export function SelectionOverlay() {
     }
 
     setShowMenu(true)
-  }, [selectedItems, selectionKey, suppressedSelectionKey, dragSuppressedSelectionKey, supportsImmediateMenu, marqueeSelection.isActive])
+  }, [selectedItems, selectionKey, suppressedSelectionKey, dragSuppressedSelectionKey, supportsImmediateMenu, showTouchMultiSelectMenu, marqueeSelection.isActive])
 
   const menuStyle = selectionBounds
     ? (() => {
@@ -136,7 +137,7 @@ export function SelectionOverlay() {
   const marqueeWidth = Math.abs(marqueeSelection.currentX - marqueeSelection.startX)
   const marqueeHeight = Math.abs(marqueeSelection.currentY - marqueeSelection.startY)
   const handleActionClick = (action: typeof menuActions[number]) => {
-    const isTouchFlipAction = !supportsImmediateMenu && (action.id === 'flip-stack' || action.id === 'flip-cards')
+    const isTouchFlipAction = showTouchMultiSelectMenu && (action.id === 'flip-stack' || action.id === 'flip-cards')
     if (!isTouchFlipAction) {
       action.execute()
       return

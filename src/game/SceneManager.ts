@@ -875,6 +875,15 @@ export class SceneManager {
         store.setSelectedItems(selectionItems)
       }
 
+      if (this.isTouchLikePointer(e)) {
+        const tappedCard = this.pendingCardId ? store.cards.find((card) => card.id === this.pendingCardId) : null
+        if (tappedCard?.attachmentGroupId) {
+          store.setTouchQuickPreviewCard(this.pendingCardId)
+        } else {
+          store.clearTouchQuickPreview()
+        }
+      }
+
       if (this.isTouchLikePointer(e) && this.pendingCardId) {
         store.setFocusedCard(this.pendingCardId)
       } else if (!this.isTouchLikePointer(e) && store.focusedCardId !== null) {
