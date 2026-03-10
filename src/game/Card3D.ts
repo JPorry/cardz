@@ -56,6 +56,7 @@ export class Card3D {
   currentArtworkRotation: number = 0;
   currentBackArtworkRotation: number = 0;
   isOverlayRendering: boolean = false;
+  isBorderOverlayRendering: boolean = false;
   private frontTextureLoadVersion = 0;
   private backTextureLoadVersion = 0;
   private metadataSignature: string | null = null;
@@ -547,7 +548,7 @@ export class Card3D {
 
     if (cardData.tapped) {
       ctx.save();
-      const overlayRotation = face === 'front' ? Math.PI / 2 : -Math.PI / 2;
+      const overlayRotation = this.getMetadataOverlayRotation(face, cardData.tapped ?? false);
       ctx.translate(canvas.width / 2, canvas.height / 2);
       ctx.rotate(overlayRotation);
       ctx.translate(-drawWidth / 2, -drawHeight / 2);
@@ -612,6 +613,17 @@ export class Card3D {
       ctx.restore();
     }
     texture.needsUpdate = true;
+  }
+
+  private getMetadataOverlayRotation(face: 'front' | 'back', tapped: boolean) {
+    if (!tapped) {
+      return 0;
+    }
+
+    // The back overlay mesh is already flipped with a 180deg Y rotation, so both
+    // canvases should use the same quarter-turn to stay upright on the rendered card.
+    void face;
+    return Math.PI / 2;
   }
 
   updateMetadata(cardData: CardState, options?: { showOnTopOfDeck?: boolean }) {
@@ -716,16 +728,32 @@ export class Card3D {
 
   setOverlayRendering(enabled: boolean) {
     this.isOverlayRendering = enabled
-    const depthTest = !enabled
+    const faceDepthTest = !enabled
     ;[
       this.bodyMat,
-      this.frontBorderMat,
-      this.backBorderMat,
       this.frontMat,
       this.backMat,
     ].forEach((material) => {
-      if (!material || material.depthTest === depthTest) return
-      material.depthTest = depthTest
+      if (!material || material.depthTest === faceDepthTest) return
+      material.depthTest = faceDepthTest
+      material.needsUpdate = true
+    })
+    this.updateBorderDepthTest()
+  }
+
+  setBorderOverlayRendering(enabled: boolean) {
+    this.isBorderOverlayRendering = enabled
+    this.updateBorderDepthTest()
+  }
+
+  private updateBorderDepthTest() {
+    const borderDepthTest = !(this.isOverlayRendering || this.isBorderOverlayRendering)
+    ;[
+      this.frontBorderMat,
+      this.backBorderMat,
+    ].forEach((material) => {
+      if (!material || material.depthTest === borderDepthTest) return
+      material.depthTest = borderDepthTest
       material.needsUpdate = true
     })
   }

@@ -2592,18 +2592,26 @@ export class SceneManager {
         this.setCardSceneMembership(data.id, Boolean(state.examinedStack?.cardOrder.includes(data.id)))
         c3d.refreshArtwork(data.artworkUrl, data.backArtworkUrl ?? this.activeGame.cardPresentation.getDefaultCardBackUrl(data.typeCode));
         const deck = state.decks.find((entry) => entry.cardIds.includes(data.id))
+        const isTopOfDeck = Boolean(deck && getDeckTopCardId(deck) === data.id)
+        const displayedMetadataCard = isTopOfDeck && deck
+          ? {
+            ...data,
+            faceUp: data.faceUp,
+            tapped: deck.tapped,
+            rotation: deck.rotation,
+          }
+          : data
         const showOnTopOfDeck = Boolean(
-          deck
-          && getDeckTopCardId(deck) === data.id
+          isTopOfDeck
           && (
-            data.faceUp
+            displayedMetadataCard.faceUp
             || (
               Boolean(data.backArtworkUrl)
               && data.backArtworkUrl !== this.activeGame.cardPresentation.getDefaultCardBackUrl(data.typeCode)
             )
           ),
         )
-        c3d.updateMetadata(data, { showOnTopOfDeck });
+        c3d.updateMetadata(displayedMetadataCard, { showOnTopOfDeck });
       }
     }
 
@@ -2644,6 +2652,12 @@ export class SceneManager {
     const selectedCardIds = new Set(state.selectedItems.filter((item) => item.kind === 'card').map((item) => item.id))
     const selectedDeckIds = new Set(state.selectedItems.filter((item) => item.kind === 'deck').map((item) => item.id))
     const examinedCardIndexMap = new Map<string, number>((state.examinedStack?.cardOrder ?? []).map((cardId, index) => [cardId, index]))
+    const sequenceAttachmentGroupIds = new Set(
+      state.decks
+        .filter((deck) => deck.kind === 'sequence')
+        .map((deck) => this.getSequenceAttachmentGroupId(deck.id))
+        .filter((groupId): groupId is string => Boolean(groupId)),
+    )
 
     for (const deck of storeDecks) {
       for (const cardId of deck.cardIds) {
@@ -2693,7 +2707,13 @@ export class SceneManager {
       const inDeck = cardData.location === 'deck';
       const handIndex = cardData.location === 'hand' ? (handIndexMap.get(cardData.id) ?? -1) : -1
       const examinedIndex = examinedCardIndexMap.get(cardData.id) ?? -1
-      card3D.setOverlayRendering(examinedIndex >= 0 || Boolean(cardData.attachmentGroupId))
+      const isNonSequenceTableAttachment = Boolean(
+        cardData.location === 'table'
+        && cardData.attachmentGroupId
+        && !sequenceAttachmentGroupIds.has(cardData.attachmentGroupId),
+      )
+      card3D.setOverlayRendering(examinedIndex >= 0)
+      card3D.setBorderOverlayRendering(isNonSequenceTableAttachment)
       const deck = cardToDeckMap.get(cardData.id);
       const isVisibleDeckCard = Boolean(deck && getDeckTopCardId(deck) === cardData.id)
       const attachmentRenderOrder = examinedIndex >= 0
