@@ -143,7 +143,6 @@ export const CardPreview: React.FC = () => {
     selectedItems,
     selectionBounds,
     marqueeSelection,
-    examinedStack,
     isDragging,
     setPreviewCard,
     adjustCardCounter,
@@ -157,6 +156,7 @@ export const CardPreview: React.FC = () => {
   const [imageAspectRatios, setImageAspectRatios] = useState<Record<string, number>>({})
   const supportsHoverPreview = useSupportsHoverPreview()
   const previewOpenedAtRef = useRef<number | null>(null)
+  const hasExplicitTouchPreview = touchQuickPreviewCardId !== null
 
   const hoveredCard = cards.find((c) => c.id === hoveredCardId)
   const selectedDeck = selectedItems.length === 1 && selectedItems[0]?.kind === 'deck'
@@ -164,12 +164,11 @@ export const CardPreview: React.FC = () => {
     : null
   const touchAttachmentPreviewCardId = getTouchAttachmentPreviewCardId(selectedItems, cards, touchQuickPreviewCardId)
   const canShowTouchPreview = (
-    !supportsHoverPreview
+    (!supportsHoverPreview || hasExplicitTouchPreview)
     && (selectedItems.length === 1 || touchAttachmentPreviewCardId !== null)
     && !previewCardId
     && !marqueeSelection.isActive
     && !isDragging
-    && examinedStack === null
   )
   const touchPreviewSelection = canShowTouchPreview
     ? (
@@ -191,13 +190,18 @@ export const CardPreview: React.FC = () => {
     ? (touchQuickPreviewCardId ?? getSelectionPreviewCardId({ activeGameId, cards, decks }, touchPreviewSelection, focusedCardId))
     : null
   const touchSelectedCard = cards.find((c) => c.id === selectedPreviewCardId)
-  const quickPreviewSourceCard = supportsHoverPreview ? hoveredCard : touchSelectedCard
+  const preferTouchPreview = canShowTouchPreview && !!touchSelectedCard
+  const quickPreviewSourceCard = preferTouchPreview ? touchSelectedCard : hoveredCard
   const quickPreviewCard = canQuickPreviewCard(quickPreviewSourceCard) ? quickPreviewSourceCard : null
-  const quickPreviewScreenX = supportsHoverPreview
-    ? hoveredCardScreenX
-    : selectionBounds
+  const quickPreviewScreenX = preferTouchPreview
+    ? selectionBounds
       ? selectionBounds.x + selectionBounds.width / 2
       : window.innerWidth / 2
+    : supportsHoverPreview
+      ? hoveredCardScreenX
+      : selectionBounds
+        ? selectionBounds.x + selectionBounds.width / 2
+        : window.innerWidth / 2
   const previewCard = cards.find((c) => c.id === previewCardId)
   const getVisibleArtworkUrl = (card?: typeof hoveredCard | null) => {
     if (!card) return undefined
@@ -230,7 +234,7 @@ export const CardPreview: React.FC = () => {
     previewOpenedAtRef.current = previewCardId ? performance.now() : null
   }, [previewCardId])
 
-  if (!quickPreviewCard && !previewCard && (!touchActionSet || touchActionSet.actions.length === 0)) return null
+  if (!quickPreviewCard && !previewCard) return null
 
   const getAspectRatio = (artworkUrl?: string) => {
     if (!artworkUrl) return PORTRAIT_RATIO
@@ -240,8 +244,8 @@ export const CardPreview: React.FC = () => {
   const previewAspectRatio = getAspectRatio(previewArtworkUrl)
   const quickPreviewAspectRatio = getAspectRatio(quickPreviewArtworkUrl)
   const touchActionPanelOverlap = quickPreviewAspectRatio > 1 ? 24 : 68
-  const showTouchQuickPreview = !!quickPreviewCard && !!touchActionSet && touchActionSet.actions.length > 0 && canShowTouchPreview
-  const showHoverPreview = !!quickPreviewCard && !previewCardId && supportsHoverPreview && quickPreviewArtworkUrl
+  const showTouchQuickPreview = !!quickPreviewCard && canShowTouchPreview
+  const showHoverPreview = !!quickPreviewCard && !previewCardId && supportsHoverPreview && !preferTouchPreview && quickPreviewArtworkUrl
   const isHoveredLeft = quickPreviewScreenX !== null && quickPreviewScreenX < window.innerWidth / 2
   const showBigPreview = !!previewCard
   const hoveredCounters = quickPreviewCard
@@ -406,7 +410,7 @@ export const CardPreview: React.FC = () => {
         </div>
       )}
 
-      {showTouchQuickPreview && touchActionSet && (
+      {showTouchQuickPreview && (
         <div
           style={{
             position: 'absolute',
@@ -668,60 +672,62 @@ export const CardPreview: React.FC = () => {
               )}
             </div>
 
-            <div
-              className="card-preview-touch-action-panel"
-              style={{
-                position: 'absolute',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                [isHoveredLeft ? 'right' : 'left']: `calc(100% - ${touchActionPanelOverlap}px)`,
-                width: 'min(18vw, 148px)',
-                maxWidth: 'calc(100vw - 32px)',
-                display: 'grid',
-                gap: '8px',
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-            >
+            {touchActionSet && touchActionSet.actions.length > 0 && (
               <div
-                className="card-preview-touch-actions"
+                className="card-preview-touch-action-panel"
                 style={{
+                  position: 'absolute',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  [isHoveredLeft ? 'right' : 'left']: `calc(100% - ${touchActionPanelOverlap}px)`,
+                  width: 'min(18vw, 148px)',
+                  maxWidth: 'calc(100vw - 32px)',
                   display: 'grid',
-                  gridTemplateColumns: '1fr',
                   gap: '8px',
                 }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
               >
-                {touchActionSet.actions.map((action) => (
-                  <button
-                    key={action.id}
-                    onClick={action.execute}
-                    className="card-preview-touch-action-button"
-                    style={{
-                      minHeight: '42px',
-                      borderRadius: '12px',
-                      border: action.id === 'reveal-card'
-                        ? '1px solid #5f95ef'
-                        : '1px solid #2e3a4a',
-                      background: action.id === 'reveal-card'
-                        ? '#2d63c2'
-                        : '#273140',
-                      boxShadow: action.id === 'reveal-card'
-                        ? '0 14px 32px rgba(20, 65, 128, 0.4), inset 0 1px 0 rgba(255,255,255,0.14)'
-                        : '0 10px 22px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.08)',
-                      color: 'white',
-                      fontSize: '15px',
-                      fontWeight: 700,
-                      textAlign: 'center',
-                      padding: '0 10px',
-                      cursor: 'pointer',
-                      touchAction: 'manipulation',
-                    }}
-                  >
-                    {action.label}
-                  </button>
-                ))}
+                <div
+                  className="card-preview-touch-actions"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr',
+                    gap: '8px',
+                  }}
+                >
+                  {touchActionSet.actions.map((action) => (
+                    <button
+                      key={action.id}
+                      onClick={action.execute}
+                      className="card-preview-touch-action-button"
+                      style={{
+                        minHeight: '42px',
+                        borderRadius: '12px',
+                        border: action.id === 'reveal-card'
+                          ? '1px solid #5f95ef'
+                          : '1px solid #2e3a4a',
+                        background: action.id === 'reveal-card'
+                          ? '#2d63c2'
+                          : '#273140',
+                        boxShadow: action.id === 'reveal-card'
+                          ? '0 14px 32px rgba(20, 65, 128, 0.4), inset 0 1px 0 rgba(255,255,255,0.14)'
+                          : '0 10px 22px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.08)',
+                        color: 'white',
+                        fontSize: '15px',
+                        fontWeight: 700,
+                        textAlign: 'center',
+                        padding: '0 10px',
+                        cursor: 'pointer',
+                        touchAction: 'manipulation',
+                      }}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}

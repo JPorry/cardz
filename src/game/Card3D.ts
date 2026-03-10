@@ -10,6 +10,14 @@ const OVERLAY_TEXTURE_HEIGHT = 768;
 const OVERLAY_PLANE_WIDTH = CARD_WIDTH * 0.94;
 const OVERLAY_PLANE_HEIGHT = CARD_HEIGHT * 0.94;
 const OVERLAY_OFFSET = CARD_THICKNESS / 2 + 0.02;
+const CARD_CORNER_RADIUS = 0.1;
+const CARD_FACE_INSET_X = CARD_WIDTH * 0.025;
+const CARD_FACE_INSET_Y = CARD_HEIGHT * 0.025;
+const CARD_FACE_RADIUS = 0.08;
+const CARD_BORDER_FRONT_Z_OFFSET = CARD_THICKNESS / 2 + 0.003;
+const CARD_BORDER_BACK_Z_OFFSET = -CARD_THICKNESS / 2 - 0.003;
+const CARD_FACE_FRONT_Z_OFFSET = CARD_THICKNESS / 2 + 0.005;
+const CARD_FACE_BACK_Z_OFFSET = -CARD_THICKNESS / 2 - 0.005;
 const PLACEHOLDER_FRONT_COLOR = new THREE.Color(0xd8d1c4);
 const PLACEHOLDER_BACK_COLOR = new THREE.Color(0x566072);
 const SHARED_TEXTURE_LOADER = new THREE.TextureLoader();
@@ -40,6 +48,9 @@ export class Card3D {
   frontMat?: THREE.MeshStandardMaterial;
   backMesh?: THREE.Mesh;
   backMat?: THREE.MeshStandardMaterial;
+  bodyMat?: THREE.MeshStandardMaterial;
+  frontBorderMat?: THREE.MeshBasicMaterial;
+  backBorderMat?: THREE.MeshBasicMaterial;
   currentArtworkUrl?: string;
   currentBackArtworkUrl?: string;
   currentArtworkRotation: number = 0;
@@ -158,10 +169,21 @@ export class Card3D {
     return shape;
   }
 
+  private createCardFaceShape() {
+    return this.createRoundedRectShape(
+      CARD_WIDTH - CARD_FACE_INSET_X * 2,
+      CARD_HEIGHT - CARD_FACE_INSET_Y * 2,
+      CARD_FACE_RADIUS,
+    );
+  }
+
   private setupMeshes() {
-    const cardShape = this.createRoundedRectShape(CARD_WIDTH, CARD_HEIGHT, 0.1);
-    const borderShape = this.createRoundedRectShape(CARD_WIDTH, CARD_HEIGHT, 0.1);
-    const innerBorderHole = this.createRoundedRectShape(CARD_WIDTH * 0.965, CARD_HEIGHT * 0.965, 0.08);
+    const cardShape = this.createRoundedRectShape(CARD_WIDTH, CARD_HEIGHT, CARD_CORNER_RADIUS);
+    const borderShape = this.createRoundedRectShape(CARD_WIDTH, CARD_HEIGHT, CARD_CORNER_RADIUS);
+    const faceShape = this.createCardFaceShape();
+    const faceWidth = CARD_WIDTH - CARD_FACE_INSET_X * 2;
+    const faceHeight = CARD_HEIGHT - CARD_FACE_INSET_Y * 2;
+    const innerBorderHole = this.createCardFaceShape();
     borderShape.holes.push(innerBorderHole);
     
     // Main extruded body
@@ -181,6 +203,7 @@ export class Card3D {
       polygonOffsetFactor: -2,
       polygonOffsetUnits: -2,
     });
+    this.bodyMat = centerMat;
     const centerMesh = new THREE.Mesh(centerGeometry, centerMat);
     centerMesh.castShadow = true;
     centerMesh.receiveShadow = true;
@@ -193,24 +216,24 @@ export class Card3D {
       transparent: false,
       opacity: 1,
       side: THREE.DoubleSide,
-      polygonOffset: true,
-      polygonOffsetFactor: -3,
-      polygonOffsetUnits: -3,
+      depthWrite: false,
     });
+    this.frontBorderMat = borderMaterial;
 
     const frontBorderMesh = new THREE.Mesh(borderGeometry, borderMaterial);
-    frontBorderMesh.position.set(0, 0, CARD_THICKNESS / 2 + 0.003);
-    frontBorderMesh.userData.renderOrderOffset = -1;
+    frontBorderMesh.position.set(0, 0, CARD_BORDER_FRONT_Z_OFFSET);
+    frontBorderMesh.userData.renderOrderOffset = 0;
     this.group.add(frontBorderMesh);
 
-    const backBorderMesh = new THREE.Mesh(borderGeometry.clone(), borderMaterial.clone());
-    backBorderMesh.position.set(0, 0, -CARD_THICKNESS / 2 - 0.003);
+    const backBorderMaterial = borderMaterial.clone();
+    this.backBorderMat = backBorderMaterial;
+    const backBorderMesh = new THREE.Mesh(borderGeometry.clone(), backBorderMaterial);
+    backBorderMesh.position.set(0, 0, CARD_BORDER_BACK_Z_OFFSET);
     backBorderMesh.rotation.set(0, Math.PI, 0);
-    backBorderMesh.userData.renderOrderOffset = -1;
+    backBorderMesh.userData.renderOrderOffset = 0;
     this.group.add(backBorderMesh);
 
     // Front face
-    const faceShape = this.createRoundedRectShape(CARD_WIDTH * 0.95, CARD_HEIGHT * 0.95, 0.08);
     const faceGeometry = new THREE.ShapeGeometry(faceShape);
     
     this.frontMat = new THREE.MeshStandardMaterial({
@@ -222,14 +245,14 @@ export class Card3D {
       polygonOffsetUnits: -2,
     });
     this.frontMesh = new THREE.Mesh(faceGeometry, this.frontMat);
-    this.frontMesh.position.set(0, 0, CARD_THICKNESS / 2 + 0.005);
+    this.frontMesh.position.set(0, 0, CARD_FACE_FRONT_Z_OFFSET);
     this.frontMesh.userData.renderOrderOffset = 0;
     
     // Manually fix UVs for the face geometry to ensure they are [0, 1]
     const pos = faceGeometry.attributes.position;
     const uv = faceGeometry.attributes.uv;
-    const w = CARD_WIDTH * 0.95;
-    const h = CARD_HEIGHT * 0.95;
+    const w = faceWidth;
+    const h = faceHeight;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const y = pos.getY(i);
@@ -249,7 +272,7 @@ export class Card3D {
       polygonOffsetUnits: -2,
     });
     this.backMesh = new THREE.Mesh(faceGeometry, this.backMat);
-    this.backMesh.position.set(0, 0, -CARD_THICKNESS / 2 - 0.005);
+    this.backMesh.position.set(0, 0, CARD_FACE_BACK_Z_OFFSET);
     this.backMesh.rotation.set(0, Math.PI, 0);
     this.backMesh.userData.renderOrderOffset = 0;
     this.group.add(this.backMesh);
@@ -310,7 +333,7 @@ export class Card3D {
   }
 
   private setupGhostMeshes() {
-    const cardShape = this.createRoundedRectShape(CARD_WIDTH, CARD_HEIGHT, 0.1);
+    const cardShape = this.createRoundedRectShape(CARD_WIDTH, CARD_HEIGHT, CARD_CORNER_RADIUS);
     const extrudeSettings = { steps: 1, depth: CARD_THICKNESS, bevelEnabled: false };
     const centerGeometry = new THREE.ExtrudeGeometry(cardShape, extrudeSettings);
     centerGeometry.translate(0, 0, -CARD_THICKNESS / 2);
@@ -320,7 +343,7 @@ export class Card3D {
     centerMesh.userData.renderOrderOffset = 0;
     this.ghostGroup.add(centerMesh);
 
-    const faceShape = this.createRoundedRectShape(CARD_WIDTH * 0.95, CARD_HEIGHT * 0.95, 0.08);
+    const faceShape = this.createCardFaceShape();
     const faceGeometry = new THREE.ShapeGeometry(faceShape);
     
     const frontMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false });
@@ -693,6 +716,18 @@ export class Card3D {
 
   setOverlayRendering(enabled: boolean) {
     this.isOverlayRendering = enabled
+    const depthTest = !enabled
+    ;[
+      this.bodyMat,
+      this.frontBorderMat,
+      this.backBorderMat,
+      this.frontMat,
+      this.backMat,
+    ].forEach((material) => {
+      if (!material || material.depthTest === depthTest) return
+      material.depthTest = depthTest
+      material.needsUpdate = true
+    })
   }
 
   update(delta: number) {

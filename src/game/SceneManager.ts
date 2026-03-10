@@ -600,6 +600,14 @@ export class SceneManager {
     return topCardId === card.id ? card : null
   }
 
+  private shouldOpenTouchQuickPreview(card?: CardState | null) {
+    if (!card || card.location === 'hand') {
+      return false
+    }
+
+    return Boolean(card.attachmentGroupId) || this.isCardInExaminedStack(card.id)
+  }
+
   private getHoverZoneFromIntersection(card: CardState, intersection: THREE.Intersection<THREE.Object3D>): HoverCardZone {
     const card3D = this.cards.get(card.id)
     if (!card3D) {
@@ -962,7 +970,7 @@ export class SceneManager {
 
       if (this.isTouchLikePointer(e)) {
         const tappedCard = this.pendingCardId ? store.cards.find((card) => card.id === this.pendingCardId) : null
-        if (tappedCard?.attachmentGroupId && tappedCard.location !== 'hand') {
+        if (this.shouldOpenTouchQuickPreview(tappedCard)) {
           store.setTouchQuickPreviewCard(this.pendingCardId)
         } else {
           store.clearTouchQuickPreview()
