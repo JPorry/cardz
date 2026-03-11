@@ -2592,26 +2592,19 @@ export class SceneManager {
         this.setCardSceneMembership(data.id, Boolean(state.examinedStack?.cardOrder.includes(data.id)))
         c3d.refreshArtwork(data.artworkUrl, data.backArtworkUrl ?? this.activeGame.cardPresentation.getDefaultCardBackUrl(data.typeCode));
         const deck = state.decks.find((entry) => entry.cardIds.includes(data.id))
-        const isTopOfDeck = Boolean(deck && getDeckTopCardId(deck) === data.id)
-        const displayedMetadataCard = isTopOfDeck && deck
+        const isSequenceTopCard = Boolean(
+          deck
+          && deck.kind === 'sequence'
+          && getDeckTopCardId(deck) === data.id,
+        )
+        const displayedMetadataCard = isSequenceTopCard && deck
           ? {
             ...data,
-            faceUp: data.faceUp,
             tapped: deck.tapped,
             rotation: deck.rotation,
           }
           : data
-        const showOnTopOfDeck = Boolean(
-          isTopOfDeck
-          && (
-            displayedMetadataCard.faceUp
-            || (
-              Boolean(data.backArtworkUrl)
-              && data.backArtworkUrl !== this.activeGame.cardPresentation.getDefaultCardBackUrl(data.typeCode)
-            )
-          ),
-        )
-        c3d.updateMetadata(displayedMetadataCard, { showOnTopOfDeck });
+        c3d.updateMetadata(displayedMetadataCard, { showOnSequenceTop: isSequenceTopCard });
       }
     }
 

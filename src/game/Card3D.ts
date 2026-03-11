@@ -548,7 +548,7 @@ export class Card3D {
 
     if (cardData.tapped) {
       ctx.save();
-      const overlayRotation = this.getMetadataOverlayRotation(face, cardData.tapped ?? false);
+      const overlayRotation = face === 'front' ? Math.PI / 2 : -Math.PI / 2;
       ctx.translate(canvas.width / 2, canvas.height / 2);
       ctx.rotate(overlayRotation);
       ctx.translate(-drawWidth / 2, -drawHeight / 2);
@@ -615,18 +615,7 @@ export class Card3D {
     texture.needsUpdate = true;
   }
 
-  private getMetadataOverlayRotation(face: 'front' | 'back', tapped: boolean) {
-    if (!tapped) {
-      return 0;
-    }
-
-    // The back overlay mesh is already flipped with a 180deg Y rotation, so both
-    // canvases should use the same quarter-turn to stay upright on the rendered card.
-    void face;
-    return Math.PI / 2;
-  }
-
-  updateMetadata(cardData: CardState, options?: { showOnTopOfDeck?: boolean }) {
+  updateMetadata(cardData: CardState, options?: { showOnSequenceTop?: boolean }) {
     if (
       !this.metadataOverlayFrontTexture
       || !this.metadataOverlayBackTexture
@@ -636,24 +625,31 @@ export class Card3D {
       return;
     }
 
+    const game = getGameDefinition(useGameStore.getState().activeGameId);
+    const defaultBackUrl = game.cardPresentation.getDefaultCardBackUrl(cardData.typeCode);
+    const hasDistinctBack = Boolean(cardData.backArtworkUrl && cardData.backArtworkUrl !== defaultBackUrl);
     const shouldShow = Boolean(
-      (cardData.location === 'table' || options?.showOnTopOfDeck)
-      && hasVisibleCardMetadata(getGameDefinition(useGameStore.getState().activeGameId).cardSemantics, cardData.counters, cardData.statuses)
+      (cardData.location === 'table' || options?.showOnSequenceTop)
+      && hasVisibleCardMetadata(game.cardSemantics, cardData.counters, cardData.statuses)
     );
+    const showFrontMetadata = shouldShow && cardData.faceUp;
+    const showBackMetadata = shouldShow && !cardData.faceUp && hasDistinctBack;
     const nextSignature = JSON.stringify({
       faceUp: cardData.faceUp,
       tapped: cardData.tapped ?? false,
       location: cardData.location,
-      showOnTopOfDeck: options?.showOnTopOfDeck ?? false,
+      showOnSequenceTop: options?.showOnSequenceTop ?? false,
+      hasDistinctBack,
       counters: cardData.counters,
       statuses: cardData.statuses,
-      shouldShow,
+      showFrontMetadata,
+      showBackMetadata,
     });
     if (this.metadataSignature === nextSignature) {
       return;
     }
     this.metadataSignature = nextSignature;
-    const overlayDepthTest = !(options?.showOnTopOfDeck ?? false);
+    const overlayDepthTest = !(options?.showOnSequenceTop ?? false);
     const frontMaterial = this.metadataOverlayFront.material as THREE.MeshBasicMaterial;
     const backMaterial = this.metadataOverlayBack.material as THREE.MeshBasicMaterial;
     if (frontMaterial.depthTest !== overlayDepthTest) {
@@ -664,15 +660,19 @@ export class Card3D {
       backMaterial.depthTest = overlayDepthTest;
       backMaterial.needsUpdate = true;
     }
-    this.metadataOverlayFront.visible = shouldShow && cardData.faceUp;
-    this.metadataOverlayBack.visible = shouldShow && !cardData.faceUp;
+    this.metadataOverlayFront.visible = showFrontMetadata;
+    this.metadataOverlayBack.visible = showBackMetadata;
 
-    if (!shouldShow) {
+    if (!showFrontMetadata && !showBackMetadata) {
       return;
     }
 
-    this.drawMetadataOverlay(this.metadataOverlayFrontTexture, cardData, 'front');
-    this.drawMetadataOverlay(this.metadataOverlayBackTexture, cardData, 'back');
+    if (showFrontMetadata) {
+      this.drawMetadataOverlay(this.metadataOverlayFrontTexture, cardData, 'front');
+    }
+    if (showBackMetadata) {
+      this.drawMetadataOverlay(this.metadataOverlayBackTexture, cardData, 'back');
+    }
   }
 
   setSelected(selected: boolean, stackSelected = false) {
