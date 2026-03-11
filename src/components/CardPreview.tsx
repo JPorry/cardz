@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { useGameStore, type SelectionItem } from '../store'
+import { canModifyCardMetadata, useGameStore, type SelectionItem } from '../store'
 import { useSupportsHoverPreview } from '../hooks/useSupportsHoverPreview'
 import { getCardBackUrl } from '../services/marvelCdb'
 import { getSelectionPreviewCardId } from '../utils/previewCards'
@@ -39,7 +39,7 @@ function getPreviewImageFrameStyle(radius: string): React.CSSProperties {
   }
 }
 
-function getStatusToggleStyle(color: string, active: boolean): React.CSSProperties {
+function getStatusToggleStyle(color: string, active: boolean, disabled = false): React.CSSProperties {
   return {
     minHeight: '60px',
     borderRadius: '16px',
@@ -50,12 +50,12 @@ function getStatusToggleStyle(color: string, active: boolean): React.CSSProperti
     color: active ? 'white' : 'rgba(255,255,255,0.92)',
     fontWeight: 700,
     fontSize: '15px',
-    cursor: 'pointer',
+    cursor: disabled ? 'not-allowed' : 'pointer',
     padding: '10px 14px',
     boxShadow: active
       ? `0 18px 38px ${withAlpha(color, '2e')}, inset 0 1px 0 ${withAlpha(color, '5c')}`
       : `inset 0 1px 0 ${withAlpha(color, '1f')}`,
-    opacity: active ? 1 : 0.82,
+    opacity: disabled ? 0.45 : active ? 1 : 0.82,
     transition: 'transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, opacity 120ms ease',
   }
 }
@@ -271,6 +271,8 @@ export const CardPreview: React.FC = () => {
       || (selectedItems.length === 1 && selectedItems[0]?.kind === 'deck')
     )
   )
+  const canEditQuickPreviewMetadata = Boolean(quickPreviewCard && canModifyCardMetadata(quickPreviewCard))
+  const canEditPreviewMetadata = Boolean(previewCard && canModifyCardMetadata(previewCard))
   const closePreview = () => {
     if (previewOpenedAtRef.current !== null && performance.now() - previewOpenedAtRef.current < 250) return
     setPreviewCard(null)
@@ -551,123 +553,127 @@ export const CardPreview: React.FC = () => {
                     </div>
                   </div>
 
-                  <div
-                    className="card-preview-touch-counters"
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                      gap: '8px',
-                    }}
-                  >
-                    {counterControls.map((counter) => (
+                  {canEditQuickPreviewMetadata && (
+                    <>
                       <div
-                        key={counter.key}
+                        className="card-preview-touch-counters"
                         style={{
                           display: 'grid',
-                          gridTemplateColumns: '1fr auto auto auto',
-                          alignItems: 'center',
-                          gap: '6px',
-                          padding: '8px',
-                          borderRadius: '14px',
-                          border: `1px solid ${withAlpha(counterColors[counter.key], '4f')}`,
-                          background: `linear-gradient(180deg, ${withAlpha(counterColors[counter.key], '20')}, rgba(255,255,255,0.03))`,
+                          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                          gap: '8px',
                         }}
                       >
-                        <div style={{ minWidth: 0 }}>
+                        {counterControls.map((counter) => (
                           <div
+                            key={counter.key}
                             style={{
-                              color: 'white',
-                              fontSize: '11px',
-                              fontWeight: 700,
-                              lineHeight: 1.1,
-                              letterSpacing: '0.12em',
-                              textTransform: 'uppercase',
-                            }}
-                          >
-                            {counter.shortLabel}
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => adjustCardCounter(quickPreviewCard.id, counter.key, -1)}
-                          style={touchStepperButtonStyle}
-                        >
-                          −
-                        </button>
-                        <div
-                          style={{
-                            minWidth: '32px',
-                            padding: '6px 4px',
-                            borderRadius: '10px',
-                            textAlign: 'center',
-                            color: 'white',
-                            fontWeight: 800,
-                            fontSize: '16px',
-                            fontVariantNumeric: 'tabular-nums',
-                            background: withAlpha(counterColors[counter.key], quickPreviewCard.counters[counter.key] > 0 ? '29' : '14'),
-                            border: `1px solid ${withAlpha(counterColors[counter.key], quickPreviewCard.counters[counter.key] > 0 ? '5f' : '2e')}`,
-                          }}
-                        >
-                          {quickPreviewCard.counters[counter.key]}
-                        </div>
-                        <button
-                          onClick={() => adjustCardCounter(quickPreviewCard.id, counter.key, 1)}
-                          style={touchStepperButtonStyle}
-                        >
-                          +
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div
-                    className="card-preview-touch-statuses"
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-                      gap: '8px',
-                    }}
-                  >
-                    {statusControls.map((status) => {
-                      const active = quickPreviewCard.statuses[status.key]
-                      const color = statusColors[status.key]
-                      return (
-                        <button
-                          key={status.key}
-                          onClick={() => toggleCardStatus(quickPreviewCard.id, status.key)}
-                          style={{
-                            ...getStatusToggleStyle(color, active),
-                            minHeight: '40px',
-                            fontSize: '12px',
-                            padding: '8px 10px',
-                            borderRadius: '12px',
-                          }}
-                        >
-                          <span
-                            style={{
-                              display: 'inline-flex',
+                              display: 'grid',
+                              gridTemplateColumns: '1fr auto auto auto',
                               alignItems: 'center',
-                              justifyContent: 'center',
-                              gap: '10px',
+                              gap: '6px',
+                              padding: '8px',
+                              borderRadius: '14px',
+                              border: `1px solid ${withAlpha(counterColors[counter.key], '4f')}`,
+                              background: `linear-gradient(180deg, ${withAlpha(counterColors[counter.key], '20')}, rgba(255,255,255,0.03))`,
                             }}
                           >
-                            <span
-                              aria-hidden="true"
+                            <div style={{ minWidth: 0 }}>
+                              <div
+                                style={{
+                                  color: 'white',
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  lineHeight: 1.1,
+                                  letterSpacing: '0.12em',
+                                  textTransform: 'uppercase',
+                                }}
+                              >
+                                {counter.shortLabel}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => adjustCardCounter(quickPreviewCard.id, counter.key, -1)}
+                              style={touchStepperButtonStyle}
+                            >
+                              −
+                            </button>
+                            <div
                               style={{
-                                width: '10px',
-                                height: '10px',
-                                borderRadius: '999px',
-                                background: active ? color : 'rgba(214, 214, 219, 0.7)',
-                                boxShadow: active
-                                  ? `0 0 0 6px ${withAlpha(color, '2b')}`
-                                  : 'none',
+                                minWidth: '32px',
+                                padding: '6px 4px',
+                                borderRadius: '10px',
+                                textAlign: 'center',
+                                color: 'white',
+                                fontWeight: 800,
+                                fontSize: '16px',
+                                fontVariantNumeric: 'tabular-nums',
+                                background: withAlpha(counterColors[counter.key], quickPreviewCard.counters[counter.key] > 0 ? '29' : '14'),
+                                border: `1px solid ${withAlpha(counterColors[counter.key], quickPreviewCard.counters[counter.key] > 0 ? '5f' : '2e')}`,
                               }}
-                            />
-                            <span>{status.label}</span>
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
+                            >
+                              {quickPreviewCard.counters[counter.key]}
+                            </div>
+                            <button
+                              onClick={() => adjustCardCounter(quickPreviewCard.id, counter.key, 1)}
+                              style={touchStepperButtonStyle}
+                            >
+                              +
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div
+                        className="card-preview-touch-statuses"
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                          gap: '8px',
+                        }}
+                      >
+                        {statusControls.map((status) => {
+                          const active = quickPreviewCard.statuses[status.key]
+                          const color = statusColors[status.key]
+                          return (
+                            <button
+                              key={status.key}
+                              onClick={() => toggleCardStatus(quickPreviewCard.id, status.key)}
+                              style={{
+                                ...getStatusToggleStyle(color, active),
+                                minHeight: '40px',
+                                fontSize: '12px',
+                                padding: '8px 10px',
+                                borderRadius: '12px',
+                              }}
+                            >
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '10px',
+                                }}
+                              >
+                                <span
+                                  aria-hidden="true"
+                                  style={{
+                                    width: '10px',
+                                    height: '10px',
+                                    borderRadius: '999px',
+                                    background: active ? color : 'rgba(214, 214, 219, 0.7)',
+                                    boxShadow: active
+                                      ? `0 0 0 6px ${withAlpha(color, '2b')}`
+                                      : 'none',
+                                  }}
+                                />
+                                <span>{status.label}</span>
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -939,8 +945,12 @@ export const CardPreview: React.FC = () => {
                         }}
                       >
                         <button
+                          disabled={!canEditPreviewMetadata}
                           onClick={() => adjustCardCounter(previewCard.id, counter.key, -1)}
-                          style={stepperButtonStyle}
+                          style={{
+                            ...stepperButtonStyle,
+                            ...(canEditPreviewMetadata ? null : disabledButtonStyle),
+                          }}
                         >
                           −
                         </button>
@@ -964,8 +974,12 @@ export const CardPreview: React.FC = () => {
                           {previewCard.counters[counter.key]}
                         </div>
                         <button
+                          disabled={!canEditPreviewMetadata}
                           onClick={() => adjustCardCounter(previewCard.id, counter.key, 1)}
-                          style={stepperButtonStyle}
+                          style={{
+                            ...stepperButtonStyle,
+                            ...(canEditPreviewMetadata ? null : disabledButtonStyle),
+                          }}
                         >
                           +
                         </button>
@@ -992,8 +1006,9 @@ export const CardPreview: React.FC = () => {
                       return (
                         <button
                           key={status.key}
+                          disabled={!canEditPreviewMetadata}
                           onClick={() => toggleCardStatus(previewCard.id, status.key)}
-                          style={getStatusToggleStyle(color, active)}
+                          style={getStatusToggleStyle(color, active, !canEditPreviewMetadata)}
                         >
                           <span
                             style={{
@@ -1152,4 +1167,9 @@ const touchStepperButtonStyle: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   touchAction: 'manipulation',
+}
+
+const disabledButtonStyle: React.CSSProperties = {
+  cursor: 'not-allowed',
+  opacity: 0.45,
 }

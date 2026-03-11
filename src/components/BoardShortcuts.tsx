@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent } from 'react'
 import { executeFlipShortcut, executeStackShortcut, executeTapShortcut } from '../utils/selectionActions'
-import { getDeckTopCardId, useGameStore } from '../store'
+import { canModifyCardMetadata, useGameStore } from '../store'
 import { getGameDefinition } from '../games/registry'
 
 type BoardShortcutsProps = {
@@ -33,11 +33,7 @@ export function BoardShortcuts({ disabled = false }: BoardShortcutsProps) {
       return false
     }
 
-    const isVisibleTableCard = card.location === 'table'
-    const isVisibleTopOfDeck = card.location === 'deck' && store.decks.some((deck) => (
-      getDeckTopCardId(deck) === card.id
-    ))
-    if (!isVisibleTableCard && !isVisibleTopOfDeck) {
+    if (!canModifyCardMetadata(card) || card.location !== 'table') {
       return false
     }
 

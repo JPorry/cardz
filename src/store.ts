@@ -138,6 +138,10 @@ export interface RegionState {
   flipped: boolean
 }
 
+export function canModifyCardMetadata(card: Pick<CardState, 'location'>) {
+  return card.location !== 'deck'
+}
+
 export interface GameState {
   activeGameId: string
   activeGameVersion: number
@@ -1131,7 +1135,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   setFocusedCard: (id) => set({ focusedCardId: id }),
   setCardCounter: (id, counter, value) => set((state) => ({
     cards: state.cards.map((card) => (
-      card.id === id
+      card.id === id && canModifyCardMetadata(card)
         ? {
             ...card,
             counters: {
@@ -1144,7 +1148,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   })),
   adjustCardCounter: (id, counter, delta) => set((state) => ({
     cards: state.cards.map((card) => (
-      card.id === id
+      card.id === id && canModifyCardMetadata(card)
         ? {
             ...card,
             counters: {
@@ -1157,7 +1161,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   })),
   toggleCardStatus: (id, status) => set((state) => ({
     cards: state.cards.map((card) => (
-      card.id === id
+      card.id === id && canModifyCardMetadata(card)
         ? {
             ...card,
             statuses: {
@@ -1170,7 +1174,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   })),
   setCardStatus: (id, status, active) => set((state) => ({
     cards: state.cards.map((card) => (
-      card.id === id
+      card.id === id && canModifyCardMetadata(card)
         ? {
             ...card,
             statuses: {
