@@ -757,6 +757,7 @@ function prepareCardsForRegion(
   region: RegionState,
   lanes: LaneState[],
   regions: RegionState[],
+  tapped = false,
 ): CardState[] {
   return cards.map((card) => (
     applyFaceStateFromContainer(
@@ -765,7 +766,7 @@ function prepareCardsForRegion(
         location: 'deck' as const,
         laneId: undefined,
         regionId: undefined,
-        position: computeRegionCardPosition(region),
+        position: computeRegionCardPosition(region, tapped),
         faceUp: false,
       }, [0, 0, 0]),
       lanes,
@@ -833,11 +834,6 @@ function getRegionById(regions: RegionState[], regionId: string): RegionState | 
   return regions.find((region) => region.id === regionId)
 }
 
-function getRegionPosition(regions: RegionState[], regionId: string): [number, number, number] | null {
-  const region = getRegionById(regions, regionId)
-  return region ? computeRegionCardPosition(region) : null
-}
-
 function getOrderedCardIdsForSelection(state: Pick<GameState, 'cards' | 'decks'>, items: SelectionItem[]): string[] {
   return items.flatMap((item) => {
     if (item.kind === 'card') {
@@ -859,9 +855,6 @@ function buildRegionSettlement(
   preferredDeckId?: string | null,
   preserveSelection = true,
 ): Partial<GameState> {
-  const position = getRegionPosition(state.regions, regionId)
-  if (!position) return {}
-
   const cardIds = orderedCardIds.filter((cardId, index) => orderedCardIds.indexOf(cardId) === index)
   const cardIdSet = new Set(cardIds)
   const preferredDeck = preferredDeckId
@@ -874,6 +867,9 @@ function buildRegionSettlement(
         tapped: preferredDeck.tapped,
       }
     : getDefaultDeckPresentation(regionId, preferredDeckKind)
+  const region = getRegionById(state.regions, regionId)
+  if (!region) return {}
+  const position = computeRegionCardPosition(region, presentation.tapped)
   const normalizedRotation = [...presentation.rotation] as [number, number, number]
 
   if (cardIds.length === 0) {
@@ -887,7 +883,7 @@ function buildRegionSettlement(
     }
   }
 
-  if (cardIds.length === 1) {
+  if (cardIds.length === 1 && preferredDeckKind !== 'sequence') {
     const [cardId] = cardIds
     return {
       lanes: state.lanes.map((lane) => ({
@@ -905,6 +901,7 @@ function buildRegionSettlement(
                 regionId,
                 position: [...position],
                 rotation: [...normalizedRotation],
+                tapped: presentation.tapped,
                 attachmentGroupId: undefined,
                 attachmentIndex: undefined,
               },
@@ -2518,6 +2515,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         mainSchemeRegion,
         freshLanes,
         freshRegions,
+        true,
       )
       const preparedNemesisCards = prepareCardsForRegion(
         setup.nemesisDeckCards,
