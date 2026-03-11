@@ -33,7 +33,10 @@ export function BoardShortcuts({ disabled = false }: BoardShortcutsProps) {
       return false
     }
 
-    if (!canModifyCardMetadata(card) || card.location !== 'table') {
+    const isTable = card.location === 'table'
+    const isSequence = card.location === 'deck' && store.decks.find((d) => d.cardIds.includes(card.id))?.kind === 'sequence'
+
+    if (!canModifyCardMetadata(card, store.decks) || (!isTable && !isSequence)) {
       return false
     }
 

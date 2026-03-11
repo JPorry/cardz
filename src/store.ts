@@ -138,8 +138,15 @@ export interface RegionState {
   flipped: boolean
 }
 
-export function canModifyCardMetadata(card: Pick<CardState, 'location'>) {
-  return card.location !== 'deck'
+export function canModifyCardMetadata(card: Pick<CardState, 'location' | 'id'>, decks?: DeckState[]) {
+  if (card.location !== 'deck') return true
+
+  if (decks) {
+    const deck = decks.find((d) => d.cardIds.includes(card.id))
+    if (deck?.kind === 'sequence') return true
+  }
+
+  return false
 }
 
 export interface GameState {
@@ -1132,7 +1139,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   setFocusedCard: (id) => set({ focusedCardId: id }),
   setCardCounter: (id, counter, value) => set((state) => ({
     cards: state.cards.map((card) => (
-      card.id === id && canModifyCardMetadata(card)
+      card.id === id && canModifyCardMetadata(card, state.decks)
         ? {
             ...card,
             counters: {
@@ -1145,7 +1152,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   })),
   adjustCardCounter: (id, counter, delta) => set((state) => ({
     cards: state.cards.map((card) => (
-      card.id === id && canModifyCardMetadata(card)
+      card.id === id && canModifyCardMetadata(card, state.decks)
         ? {
             ...card,
             counters: {
@@ -1158,7 +1165,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   })),
   toggleCardStatus: (id, status) => set((state) => ({
     cards: state.cards.map((card) => (
-      card.id === id && canModifyCardMetadata(card)
+      card.id === id && canModifyCardMetadata(card, state.decks)
         ? {
             ...card,
             statuses: {
@@ -1171,7 +1178,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   })),
   setCardStatus: (id, status, active) => set((state) => ({
     cards: state.cards.map((card) => (
-      card.id === id && canModifyCardMetadata(card)
+      card.id === id && canModifyCardMetadata(card, state.decks)
         ? {
             ...card,
             statuses: {

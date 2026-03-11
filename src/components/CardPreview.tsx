@@ -271,8 +271,8 @@ export const CardPreview: React.FC = () => {
       || (selectedItems.length === 1 && selectedItems[0]?.kind === 'deck')
     )
   )
-  const canEditQuickPreviewMetadata = Boolean(quickPreviewCard && canModifyCardMetadata(quickPreviewCard))
-  const canEditPreviewMetadata = Boolean(previewCard && canModifyCardMetadata(previewCard))
+  const canEditQuickPreviewMetadata = Boolean(quickPreviewCard && canModifyCardMetadata(quickPreviewCard, decks))
+  const canEditPreviewMetadata = Boolean(previewCard && canModifyCardMetadata(previewCard, decks))
   const closePreview = () => {
     if (previewOpenedAtRef.current !== null && performance.now() - previewOpenedAtRef.current < 250) return
     setPreviewCard(null)
