@@ -518,41 +518,6 @@ export const CardPreview: React.FC = () => {
                     background: 'linear-gradient(180deg, rgba(11,13,18,0.96), rgba(8,9,12,0.98))',
                   }}
                 >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '12px',
-                    }}
-                  >
-                    <div
-                      style={{
-                        color: 'white',
-                        fontSize: '14px',
-                        fontWeight: 700,
-                        lineHeight: 1.2,
-                        minWidth: 0,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {quickPreviewCard.name ?? 'Card'}
-                    </div>
-                    <div
-                      style={{
-                        color: 'rgba(255,255,255,0.55)',
-                        fontSize: '10px',
-                        fontWeight: 700,
-                        letterSpacing: '0.12em',
-                        flexShrink: 0,
-                      }}
-                    >
-                      QUICK EDIT
-                    </div>
-                  </div>
-
                   {canEditQuickPreviewMetadata && (
                     <>
                       <div
